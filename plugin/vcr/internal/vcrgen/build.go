@@ -27,6 +27,7 @@ func BuildServiceSpec(genpkg string, svc *httpcodegen.ServiceData) ServiceSpec {
 		}
 
 		ep := EndpointSpec{
+			MethodName:    ed.Method.Name,
 			MethodVarName: ed.Method.VarName,
 			PayloadRef:    payloadRef,
 			ResultRef:     resultRef,

@@ -189,16 +189,10 @@ func NewPlaybackHandler(store *vcrruntime.VCR, scenario Scenario, opts PlaybackO
 
 	errHandler := func(ctx context.Context, w http.ResponseWriter, err error) {
 		// Keep this minimal: callers may install their own goa error formatter higher up.
-		// IMPORTANT: for WebSocket endpoints the response writer may be hijacked.
-		{{- if .HasWebSocket }}
 		_ = ctx
-		_ = w
-		_ = err
-		{{- else }}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
-		{{- end }}
 	}
 
 	{{- if .HasWebSocket }}

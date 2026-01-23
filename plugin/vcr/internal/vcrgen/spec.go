@@ -9,6 +9,7 @@ type ServiceSpec struct {
 }
 
 type EndpointSpec struct {
+	MethodName    string
 	MethodVarName string
 	PayloadRef    string
 	ResultRef     string

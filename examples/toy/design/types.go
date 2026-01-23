@@ -15,3 +15,9 @@ var ThingEvent = Type("ThingEvent", func() {
 	Required("type", "id")
 })
 
+var ThingSubscription = Type("ThingSubscription", func() {
+	Description("Bidirectional WebSocket subscription message.")
+	Attribute("msg", String, "Client message")
+	Required("msg")
+})
+

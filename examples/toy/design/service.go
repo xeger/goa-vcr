@@ -3,7 +3,7 @@ package design
 import . "goa.design/goa/v3/dsl"
 
 var _ = Service("toy", func() {
-	Description("Toy service with one unary and one SSE streaming endpoint.")
+	Description("Toy service with unary + SSE + WebSocket streaming endpoints.")
 
 	Method("get_thing", func() {
 		Payload(func() {
@@ -33,6 +33,39 @@ var _ = Service("toy", func() {
 			Param("id")
 			Response(StatusOK)
 			ServerSentEvents()
+		})
+	})
+
+	// Bidirectional WebSocket stream (client sends ThingSubscription, server sends ThingEvent).
+	Method("stream_things_ws", func() {
+		Payload(func() {
+			Attribute("id", String, "Thing identifier")
+			Required("id")
+		})
+
+		StreamingPayload(ThingSubscription, "Client messages")
+		StreamingResult(ThingEvent, "Server messages")
+
+		HTTP(func() {
+			GET("/things/{id}/stream-ws")
+			Param("id")
+			Response(StatusOK)
+		})
+	})
+
+	// Unidirectional WebSocket stream (server -> client only).
+	Method("stream_things_ws_send_only", func() {
+		Payload(func() {
+			Attribute("id", String, "Thing identifier")
+			Required("id")
+		})
+
+		StreamingResult(ThingEvent, "Server messages")
+
+		HTTP(func() {
+			GET("/things/{id}/stream-ws-send-only")
+			Param("id")
+			Response(StatusOK)
 		})
 	})
 })

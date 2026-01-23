@@ -46,10 +46,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/gorilla/websocket"
 	toy "%[1]s/gen/toy"
 	toyvcr "%[1]s/gen/http/toy/vcr"
 	vcrruntime "github.com/xeger/goa-vcr/runtime"
@@ -158,6 +160,99 @@ func TestPlayback_StreamingRequiresScenario(t *testing.T) {
 	}
 }
 
+func TestPlayback_WebSocketBidirectionalAndSendOnly(t *testing.T) {
+	stubRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte("{\"upstream\":\"https://example.com\"}\n"), 0600); err != nil {
+		t.Fatalf("write policy: %%v", err)
+	}
+	store, err := vcrruntime.New(stubRoot)
+	if err != nil {
+		t.Fatalf("new store: %%v", err)
+	}
+
+	sc := toyvcr.NewScenario()
+	h, err := toyvcr.NewPlaybackHandler(store, sc, toyvcr.PlaybackOptions{})
+	if err != nil {
+		t.Fatalf("handler: %%v", err)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	// Missing handler => ws dial should fail with an HTTP error response.
+	{
+		wsURL := mustWSURL(t, srv.URL, "/things/123/stream-ws")
+		_, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		if err == nil {
+			t.Fatalf("expected ws dial to fail without scenario handler")
+		}
+		if resp == nil {
+			t.Fatalf("expected HTTP response on ws handshake failure")
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if !bytes.Contains(b, []byte("no scenario handler")) {
+			t.Fatalf("expected missing scenario error, got: %%q", string(b))
+		}
+	}
+
+	// Add scenario handlers and verify we can connect and receive at least one message.
+	sc.SetStreamThingsWs(func(ctx context.Context, p *toy.StreamThingsWsPayload, stream toy.StreamThingsWsServerStream) error {
+		// Expect one client message, then reply once.
+		_, _ = stream.RecvWithContext(ctx)
+		_ = stream.SendWithContext(ctx, &toy.ThingEvent{Type: "thing", ID: p.ID})
+		return nil
+	})
+	sc.SetStreamThingsWsSendOnly(func(ctx context.Context, p *toy.StreamThingsWsSendOnlyPayload, stream toy.StreamThingsWsSendOnlyServerStream) error {
+		_ = stream.SendWithContext(ctx, &toy.ThingEvent{Type: "thing", ID: p.ID})
+		return nil
+	})
+
+	// Bidirectional
+	{
+		wsURL := mustWSURL(t, srv.URL, "/things/123/stream-ws")
+		conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		if err != nil {
+			t.Fatalf("ws dial: %%v", err)
+		}
+		defer conn.Close()
+
+		if err := conn.WriteJSON(map[string]any{"msg": "hi"}); err != nil {
+			t.Fatalf("ws write: %%v", err)
+		}
+		var evt struct {
+			Type string
+			ID   string
+		}
+		if err := conn.ReadJSON(&evt); err != nil {
+			t.Fatalf("ws read: %%v", err)
+		}
+		if evt.ID != "123" {
+			t.Fatalf("unexpected ws id: %%q", evt.ID)
+		}
+	}
+
+	// Send-only
+	{
+		wsURL := mustWSURL(t, srv.URL, "/things/456/stream-ws-send-only")
+		conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		if err != nil {
+			t.Fatalf("ws dial: %%v", err)
+		}
+		defer conn.Close()
+
+		var evt struct {
+			Type string
+			ID   string
+		}
+		if err := conn.ReadJSON(&evt); err != nil {
+			t.Fatalf("ws read: %%v", err)
+		}
+		if evt.ID != "456" {
+			t.Fatalf("unexpected ws id: %%q", evt.ID)
+		}
+	}
+}
+
 func mustGet(t *testing.T, url string, hdr http.Header) *http.Response {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodGet, url, nil)
@@ -184,6 +279,24 @@ func decodeThing(t *testing.T, r io.ReadCloser) *toy.Thing {
 		t.Fatalf("decode: %%v", err)
 	}
 	return &out
+}
+
+func mustWSURL(t *testing.T, base string, path string) string {
+	t.Helper()
+	u, err := url.Parse(base)
+	if err != nil {
+		t.Fatalf("parse base url: %%v", err)
+	}
+	switch u.Scheme {
+	case "http":
+		u.Scheme = "ws"
+	case "https":
+		u.Scheme = "wss"
+	}
+	u.Path = path
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
 }
 `, mod))
 
@@ -229,4 +342,3 @@ func writeFile(t *testing.T, path string, content string) {
 		t.Fatalf("write %s: %v", path, err)
 	}
 }
-

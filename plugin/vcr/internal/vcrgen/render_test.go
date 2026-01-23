@@ -49,7 +49,7 @@ func TestRenderServiceVCR_UnaryDispatchIncludesLoopbackBypassAndFallback(t *test
 	assertContains(t, src, `func (s *Scenario) AddGetThing`)
 }
 
-func TestRenderServiceVCR_WebSocketUsesUpgraderAndNoHijackWrites(t *testing.T) {
+func TestRenderServiceVCR_WebSocketUsesUpgrader(t *testing.T) {
 	spec := ServiceSpec{
 		GenPkg:          "github.com/example/proj/gen",
 		ServicePathName: "toyws",
@@ -79,8 +79,7 @@ func TestRenderServiceVCR_WebSocketUsesUpgraderAndNoHijackWrites(t *testing.T) {
 	src := string(data)
 
 	assertContains(t, src, `upgrader := &websocket.Upgrader{`)
-	assertContains(t, src, `// IMPORTANT: for WebSocket endpoints the response writer may be hijacked.`)
-	assertContains(t, src, `_ = w`)
+	assertContains(t, src, `server.Mount(mux)`)
 	assertContains(t, src, `v.(*toyws.StreamThingsEndpointInput)`)
 	assertContains(t, src, `return nil, f(ctx, in.Payload, in.Stream)`)
 }
