@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"goa.design/goa/v3/codegen"
+	"goa.design/goa/v3/codegen/service"
 	"goa.design/goa/v3/eval"
 	"goa.design/goa/v3/expr"
 	httpcodegen "goa.design/goa/v3/http/codegen"
@@ -24,23 +25,21 @@ func Generate(genpkg string, roots []eval.Root, files []*codegen.File) ([]*codeg
 			break
 		}
 	}
-	if root == nil {
+	if root == nil || root.API == nil || root.API.HTTP == nil {
 		return files, nil
 	}
 
-	services := httpcodegen.CreateHTTPServices(root)
-	if services == nil || len(services.HTTPData) == 0 {
-		return files, nil
-	}
+	services := httpcodegen.NewServicesData(service.NewServicesData(root), root.API.HTTP)
 
-	names := make([]string, 0, len(services.HTTPData))
-	for name := range services.HTTPData {
-		names = append(names, name)
+	// Deterministic service ordering.
+	names := make([]string, 0, len(root.Services))
+	for _, s := range root.Services {
+		names = append(names, s.Name)
 	}
 	sort.Strings(names)
 
 	for _, name := range names {
-		svc := services.Get(name)
+		svc := services.Get(name) // lazily computes services.HTTPData[name]
 		if svc == nil || svc.Service == nil {
 			continue
 		}

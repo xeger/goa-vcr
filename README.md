@@ -7,15 +7,13 @@
 
 ### Try it on a service (minimal)
 
-1. **Enable the plugin in your Goa design module** (blank import anywhere that is compiled by `goa gen`):
+1. **Run generation using the wrapper tool** (it bakes the plugin into the Goa generator binary, per the Goa plugin model described in the plugin guide: [goa.design/plugins/v3](https://pkg.go.dev/goa.design/plugins/v3)):
 
-```go
-import _ "github.com/xeger/goa-vcr/plugin/vcr"
+```bash
+go run github.com/xeger/goa-vcr/cmd/goa-vcr-goa gen <design-import-path> -o .
 ```
 
-2. **Run your normal Goa generation** (whatever wraps `goa gen ...` in that repo).
-
-3. **Use the generated package** at `gen/http/<service>/vcr`:
+2. **Use the generated package** at `gen/http/<service>/vcr`:
 
 - **Playback server**: `vcr.NewPlaybackHandler(store, scenario, vcr.PlaybackOptions{ScenarioName: "Happy"})`
 - **Loopback client for streaming scenarios**: `vcr.NewLoopbackClient(baseURL, doer)` (client always sets `X-Vcr-Loopback: 1`)

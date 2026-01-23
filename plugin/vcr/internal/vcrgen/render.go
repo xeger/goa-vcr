@@ -19,7 +19,7 @@ func RenderServiceVCR(spec ServiceSpec) *codegen.File {
 
 		codegen.NewImport("vcrruntime", "github.com/xeger/goa-vcr/runtime"),
 		codegen.NewImport("goahttp", "goa.design/goa/v3/http"),
-		codegen.SimpleImport("goa.design/goa/v3/pkg"),
+		codegen.NewImport("goa", "goa.design/goa/v3/pkg"),
 		codegen.NewImport(spec.ServicePkgName, filepath.ToSlash(filepath.Join(spec.GenPkg, spec.ServicePathName))),
 		codegen.NewImport("httpclient", filepath.ToSlash(filepath.Join(spec.GenPkg, "http", spec.ServicePathName, "client"))),
 		codegen.NewImport("httpserver", filepath.ToSlash(filepath.Join(spec.GenPkg, "http", spec.ServicePathName, "server"))),
@@ -210,7 +210,7 @@ func NewPlaybackHandler(store *vcrruntime.VCR, scenario Scenario, opts PlaybackO
 	{{- else }}
 	server := httpserver.New(eps, mux, goahttp.RequestDecoder, goahttp.ResponseEncoder, errHandler, nil)
 	{{- end }}
-	_ = server // ensure mounts are initialized
+	server.Mount(mux)
 
 	// Mark loopback requests so endpoint dispatch can avoid scenario recursion.
 	return vcrruntime.LoopbackMiddleware(mux), nil
