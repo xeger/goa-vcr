@@ -29,10 +29,12 @@ replace github.com/xeger/goa-vcr => %s
 `, mod, filepath.ToSlash(root)))
 
 	// Ensure go.sum exists for tool invocation and generation.
-	run(t, tmp, "go", "list", "-deps", "github.com/xeger/goa-vcr/cmd/goa-vcr-goa")
+	run(t, tmp, "go", "list", "-deps", "goa.design/goa/v3/cmd/goa")
 
-	// Generate code into tmp module using the wrapper tool that bakes the plugin in.
-	run(t, tmp, "go", "run", "github.com/xeger/goa-vcr/cmd/goa-vcr-goa", "gen", "github.com/xeger/goa-vcr/examples/toy/design", "-o", ".")
+	// Generate code into tmp module using the standard Goa tool.
+	// The toy design blank-imports github.com/xeger/goa-vcr/plugin/vcr, so the plugin
+	// is linked into the generator binary via transitive imports.
+	run(t, tmp, "go", "run", "goa.design/goa/v3/cmd/goa", "gen", "github.com/xeger/goa-vcr/examples/toy/design", "-o", ".")
 
 	// Add a smoke test that imports and exercises the generated VCR glue.
 	writeFile(t, filepath.Join(tmp, "toy_smoke_test.go"), fmt.Sprintf(`package toyint

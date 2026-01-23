@@ -1,6 +1,9 @@
 package design
 
-import . "goa.design/goa/v3/dsl"
+import (
+	_ "github.com/xeger/goa-vcr/plugin/vcr"
+	. "goa.design/goa/v3/dsl"
+)
 
 var _ = API("toy", func() {
 	Title("goa-vcr toy service")
@@ -13,4 +16,3 @@ var _ = API("toy", func() {
 		})
 	})
 })
-
