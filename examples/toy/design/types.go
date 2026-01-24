@@ -8,6 +8,9 @@ var Thing = Type("Thing", func() {
 })
 
 var ThingEvent = Type("ThingEvent", func() {
+	// Put this type in its own generated package to ensure our VCR plugin
+	// correctly imports user types declared outside the service package.
+	Meta("struct:pkg:path", "types")
 	Attribute("type", String, "Event type", func() {
 		Default("thing")
 	})

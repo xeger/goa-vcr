@@ -73,7 +73,19 @@ func Generate(genpkg string, roots []eval.Root, files []*codegen.File) ([]*codeg
 				continue
 			}
 			spec := vcrgen.BuildServiceSpec(genpkg, svc)
-			files = append(files, vcrgen.RenderServiceVCR(spec))
+			f := vcrgen.RenderServiceVCR(spec)
+			// Ensure we import any extra packages required by the service types.
+			// This includes:
+			// - user types generated into separate packages via "struct:pkg:path"
+			// - meta types referenced via "struct:field:type" (e.g. types.UUID)
+			if len(f.SectionTemplates) > 0 {
+				svcExpr := root.Service(name)
+				if svcExpr != nil {
+					service.AddServiceDataMetaTypeImports(f.SectionTemplates[0], svcExpr, svc.Service)
+				}
+				service.AddUserTypeImports(genpkg, f.SectionTemplates[0], svc.Service)
+			}
+			files = append(files, f)
 			seen[name] = struct{}{}
 		}
 	}

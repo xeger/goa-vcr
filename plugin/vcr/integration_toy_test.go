@@ -54,6 +54,7 @@ import (
 	"github.com/gorilla/websocket"
 	toy "%[1]s/gen/toy"
 	toyvcr "%[1]s/gen/http/toy/vcr"
+	toytypes "%[1]s/gen/types"
 	vcrruntime "github.com/xeger/goa-vcr/runtime"
 )
 
@@ -145,7 +146,7 @@ func TestPlayback_StreamingRequiresScenario(t *testing.T) {
 
 	// Add a minimal scenario handler; expect non-500 and some body.
 	sc.SetStreamThingsSse(func(ctx context.Context, p *toy.StreamThingsSsePayload, stream toy.StreamThingsSseServerStream) error {
-		_ = stream.Send(&toy.ThingEvent{Type: "thing", ID: p.ID})
+		_ = stream.Send(&toytypes.ThingEvent{Type: "thing", ID: p.ID})
 		return nil
 	})
 
@@ -199,11 +200,11 @@ func TestPlayback_WebSocketBidirectionalAndSendOnly(t *testing.T) {
 	sc.SetStreamThingsWs(func(ctx context.Context, p *toy.StreamThingsWsPayload, stream toy.StreamThingsWsServerStream) error {
 		// Expect one client message, then reply once.
 		_, _ = stream.RecvWithContext(ctx)
-		_ = stream.SendWithContext(ctx, &toy.ThingEvent{Type: "thing", ID: p.ID})
+		_ = stream.SendWithContext(ctx, &toytypes.ThingEvent{Type: "thing", ID: p.ID})
 		return nil
 	})
 	sc.SetStreamThingsWsSendOnly(func(ctx context.Context, p *toy.StreamThingsWsSendOnlyPayload, stream toy.StreamThingsWsSendOnlyServerStream) error {
-		_ = stream.SendWithContext(ctx, &toy.ThingEvent{Type: "thing", ID: p.ID})
+		_ = stream.SendWithContext(ctx, &toytypes.ThingEvent{Type: "thing", ID: p.ID})
 		return nil
 	})
 
