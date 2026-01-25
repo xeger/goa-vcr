@@ -84,6 +84,44 @@ func TestRenderServiceVCR_WebSocketUsesUpgrader(t *testing.T) {
 	assertContains(t, src, `return nil, f(ctx, in.Payload, in.Stream)`)
 }
 
+func TestRenderServiceVCR_UnaryViewedResultWrapsWithNewViewed(t *testing.T) {
+	spec := ServiceSpec{
+		GenPkg:          "github.com/example/proj/gen",
+		ServicePathName: "toyviews",
+		ServicePkgName:  "toyviews",
+		HasWebSocket:    false,
+		HasViewedResult: true,
+		Endpoints: []EndpointSpec{
+			{
+				MethodVarName:         "GetThingViewed",
+				PayloadRef:            "*toyviews.GetThingViewedPayload",
+				ResultRef:             "*toyviews.ThingWithViews",
+				IsStreaming:           false,
+				ViewedResultInitName:  "NewViewedThingWithViews",
+				ViewedResultViewName:  "",
+				Routes:                []RouteSpec{{Verb: "GET", Path: "/things/{id}/viewed"}},
+			},
+		},
+	}
+
+	f := RenderServiceVCR(spec)
+	outDir := t.TempDir()
+	outPath, err := f.Render(outDir)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	src := string(data)
+
+	assertContains(t, src, `import (`) // sanity
+	assertContains(t, src, `"reflect"`)
+	assertContains(t, src, `func viewFromPayload`)
+	assertContains(t, src, `return toyviews.NewViewedThingWithViews(res, viewFromPayload(p)), nil`)
+}
+
 func assertContains(t *testing.T, haystack, needle string) {
 	t.Helper()
 	if !strings.Contains(haystack, needle) {

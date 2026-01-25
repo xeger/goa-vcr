@@ -20,6 +20,26 @@ var _ = Service("toy", func() {
 		})
 	})
 
+	Method("get_thing_viewed", func() {
+		Payload(func() {
+			Attribute("id", String, "Thing identifier")
+			Attribute("view", String, "Response view", func() {
+				Enum("default", "extended")
+				Default("default")
+			})
+			Required("id")
+		})
+
+		Result(ThingWithViews)
+
+		HTTP(func() {
+			GET("/things/{id}/viewed")
+			Param("id")
+			Param("view")
+			Response(StatusOK)
+		})
+	})
+
 	Method("stream_things_sse", func() {
 		Payload(func() {
 			Attribute("id", String, "Thing identifier")

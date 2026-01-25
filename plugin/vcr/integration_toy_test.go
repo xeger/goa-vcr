@@ -116,6 +116,48 @@ func TestPlayback_UnaryFallbackAndLoopbackBypass(t *testing.T) {
 	}
 }
 
+func TestPlayback_UnaryViewedResult_NoPanicAndRespectsView(t *testing.T) {
+	stubRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte("{\"upstream\":\"https://example.com\",\"endpoints\":{\"GetThingViewed\":{\"variant\":{\"query\":false}}}}\n"), 0600); err != nil {
+		t.Fatalf("write policy: %%v", err)
+	}
+	store, err := vcrruntime.New(stubRoot)
+	if err != nil {
+		t.Fatalf("new store: %%v", err)
+	}
+
+	// Store an "extended" view stub for GetThingViewed, including the goa-view header.
+	body := []byte("{\"id\":\"123\",\"name\":\"widget\",\"secret\":\"s3cr3t\"}\n")
+	if err := store.WriteStub("GetThingViewed", vcrruntime.RequestSpec{URL: "http://example.com/things/123/viewed?view=extended"}, vcrruntime.ResponseMeta{
+		Status:   200,
+		MimeType: "application/json",
+		Size:     len(body),
+		Headers:  map[string]string{"goa-view": "extended"},
+	}, body); err != nil {
+		t.Fatalf("write stub: %%v", err)
+	}
+
+	sc := toyvcr.NewScenario()
+	h, err := toyvcr.NewPlaybackHandler(store, sc, toyvcr.PlaybackOptions{})
+	if err != nil {
+		t.Fatalf("handler: %%v", err)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	res := mustGet(t, srv.URL+"/things/123/viewed?view=extended", nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("unexpected status: %%d", res.StatusCode)
+	}
+	if gotView := res.Header.Get("goa-view"); gotView != "extended" {
+		t.Fatalf("unexpected goa-view: %%q", gotView)
+	}
+	got := decodeThingWithViews(t, res.Body)
+	if got.ID != "123" || got.Name != "widget" || got.Secret == nil || *got.Secret != "s3cr3t" {
+		t.Fatalf("unexpected viewed result: %%+v", got)
+	}
+}
+
 func TestPlayback_StreamingRequiresScenario(t *testing.T) {
 	stubRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte("{\"upstream\":\"https://example.com\"}\n"), 0600); err != nil {
@@ -276,6 +318,16 @@ func decodeThing(t *testing.T, r io.ReadCloser) *toy.Thing {
 	t.Helper()
 	defer r.Close()
 	var out toy.Thing
+	if err := json.NewDecoder(r).Decode(&out); err != nil {
+		t.Fatalf("decode: %%v", err)
+	}
+	return &out
+}
+
+func decodeThingWithViews(t *testing.T, r io.ReadCloser) *toy.Thingwithviews {
+	t.Helper()
+	defer r.Close()
+	var out toy.Thingwithviews
 	if err := json.NewDecoder(r).Decode(&out); err != nil {
 		t.Fatalf("decode: %%v", err)
 	}

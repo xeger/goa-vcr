@@ -25,6 +25,9 @@ func RenderServiceVCR(spec ServiceSpec) *codegen.File {
 		codegen.NewImport("httpserver", filepath.ToSlash(filepath.Join(spec.GenPkg, "http", spec.ServicePathName, "server"))),
 	}
 
+	if spec.HasViewedResult {
+		imports = append(imports, codegen.SimpleImport("reflect"))
+	}
 	if spec.HasWebSocket {
 		imports = append(imports, codegen.SimpleImport("github.com/gorilla/websocket"))
 	}
@@ -149,6 +152,33 @@ func BuildScenario(baseURL string, doer goahttp.Doer, factory ScenarioFactory) (
 	return factory(client), client, nil
 }
 
+{{- if .HasViewedResult }}
+func viewFromPayload(p any) string {
+	const def = "default"
+	if p == nil {
+		return def
+	}
+	rv := reflect.ValueOf(p)
+	if rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			return def
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Struct {
+		return def
+	}
+	f := rv.FieldByName("View")
+	if !f.IsValid() || f.Kind() != reflect.String {
+		return def
+	}
+	if v := f.String(); v != "" {
+		return v
+	}
+	return def
+}
+{{- end }}
+
 // Background uses a stub-backed HTTP client to decode stubbed responses into
 // typed Goa results.
 type Background struct {
@@ -246,6 +276,58 @@ func makeEndpoint{{ .MethodVarName }}(_ *vcrruntime.VCR, scenario Scenario, bg *
 			return nil, fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", handler)
 		}
 		return nil, f(ctx, in.Payload, in.Stream)
+	}
+}
+{{ else if and .ResultRef .ViewedResultInitName }}
+func (b *Background) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, error) {
+	var zero {{ .ResultRef }}
+	ep := b.client.{{ .MethodVarName }}()
+	res, err := ep(ctx, p)
+	if err != nil {
+		return zero, err
+	}
+	typed, ok := res.({{ .ResultRef }})
+	if !ok {
+		return zero, fmt.Errorf("vcr: unexpected {{ .MethodVarName }} response %T", res)
+	}
+	return typed, nil
+}
+
+func makeEndpoint{{ .MethodVarName }}(_ *vcrruntime.VCR, scenario Scenario, bg *Background, _ PlaybackOptions) goa.Endpoint {
+	return func(ctx context.Context, v any) (any, error) {
+		p, ok := v.({{ .PayloadRef }})
+		if !ok {
+			return nil, fmt.Errorf("vcr: unexpected {{ .MethodVarName }} payload %T", v)
+		}
+
+		var (
+			res {{ .ResultRef }}
+			err error
+		)
+
+		if vcrruntime.IsLoopback(ctx) {
+			res, err = bg.{{ .MethodVarName }}(ctx, p)
+		} else {
+			handler := scenario.Next("{{ .MethodVarName }}")
+			if handler != nil {
+				f, ok := handler.(Service{{ .MethodVarName }}Func)
+				if !ok {
+					return nil, fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", handler)
+				}
+				res, err = f(ctx, p)
+			} else {
+				res, err = bg.{{ .MethodVarName }}(ctx, p)
+			}
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		{{- if .ViewedResultViewName }}
+		return {{ $.ServicePkgName }}.{{ .ViewedResultInitName }}(res, {{ printf "%q" .ViewedResultViewName }}), nil
+		{{- else }}
+		return {{ $.ServicePkgName }}.{{ .ViewedResultInitName }}(res, viewFromPayload(p)), nil
+		{{- end }}
 	}
 }
 {{ else if .ResultRef }}

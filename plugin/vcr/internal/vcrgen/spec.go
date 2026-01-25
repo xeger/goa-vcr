@@ -5,6 +5,7 @@ type ServiceSpec struct {
 	ServicePathName string
 	ServicePkgName  string
 	HasWebSocket    bool
+	HasViewedResult bool
 	Endpoints       []EndpointSpec
 }
 
@@ -14,6 +15,13 @@ type EndpointSpec struct {
 	PayloadRef    string
 	ResultRef     string
 	IsStreaming   bool
+	// ViewedResultInitName is the name of the generated helper that constructs the
+	// viewed result wrapper from the service result, e.g. NewViewedOrganizationCollection.
+	// Empty when the method does not return a viewed result.
+	ViewedResultInitName string
+	// ViewedResultViewName is the fixed view name to use when the method has at most
+	// one view. Empty when view selection is dynamic.
+	ViewedResultViewName string
 	Routes        []RouteSpec
 }
 
