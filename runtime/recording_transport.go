@@ -67,6 +67,11 @@ func (t *RecordingTransport) RoundTrip(req *http.Request) (*http.Response, error
 		return resp, err
 	}
 
+	// Check authorization policy: if claims don't match, skip recording.
+	if !t.store.Policy.AllowRecord(req) {
+		return resp, err
+	}
+
 	// If policy/query options are implicit and we exceed max variants, flip policy and delete stubs.
 	if div != "" {
 		if _, explicit := t.store.Policy.QueryVariantEnabled(endpointName); !explicit {

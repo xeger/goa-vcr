@@ -18,8 +18,20 @@ type (
 	Policy struct {
 		// Upstream is the base URL of the upstream server, e.g. "https://atlaslive.io"
 		Upstream string `json:"upstream"`
+		// Authorization holds authorization policy for recording.
+		Authorization *AuthorizationPolicy `json:"authorization,omitempty"`
 		// Endpoints holds per-endpoint policy options keyed by endpoint name.
 		Endpoints map[string]EndpointPolicy `json:"endpoints,omitempty"`
+	}
+
+	// AuthorizationPolicy configures authorization checks for recording.
+	AuthorizationPolicy struct {
+		// Claims is a map of required JWT claim names to their required values.
+		// Values must be JSON scalars (string, number, bool, null).
+		// If Authorization: Bearer header is present, these claims must match
+		// the decoded JWT payload (no signature verification is performed).
+		// If no Authorization header is present, recording proceeds normally.
+		Claims map[string]any `json:"claims,omitempty"`
 	}
 
 	// VCR is the runtime store for VCR stubs. It loads policy from a single root
@@ -79,6 +91,10 @@ func New(root string) (*VCR, error) {
 	policy, err := readPolicy(clean)
 	if err != nil {
 		return nil, err
+	}
+
+	if err := policy.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid policy: %w", err)
 	}
 
 	return &VCR{

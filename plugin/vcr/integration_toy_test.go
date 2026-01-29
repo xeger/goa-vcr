@@ -58,6 +58,46 @@ import (
 	vcrruntime "github.com/xeger/goa-vcr/runtime"
 )
 
+func TestPlayback_PolicyWithAuthorizationClaims(t *testing.T) {
+	stubRoot := t.TempDir()
+	// Test that policy with authorization.claims loads correctly and doesn't affect playback
+	policyJSON := "{\"upstream\":\"https://example.com\",\"authorization\":{\"claims\":{\"sub\":\"deadbeef\"}}}"
+	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte(policyJSON), 0600); err != nil {
+		t.Fatalf("write policy: %%v", err)
+	}
+	store, err := vcrruntime.New(stubRoot)
+	if err != nil {
+		t.Fatalf("new store: %%v", err)
+	}
+
+	body := []byte("{\"id\":\"123\"}\n")
+	if err := store.WriteStub("GetThing", vcrruntime.RequestSpec{URL: "http://example.com/things/123"}, vcrruntime.ResponseMeta{
+		Status:   200,
+		MimeType: "application/json",
+		Size:     len(body),
+	}, body); err != nil {
+		t.Fatalf("write stub: %%v", err)
+	}
+
+	sc := toyvcr.NewScenario()
+	h, err := toyvcr.NewPlaybackHandler(store, sc, toyvcr.PlaybackOptions{ScenarioName: "test"})
+	if err != nil {
+		t.Fatalf("handler: %%v", err)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	// Playback should work normally even with authorization.claims in policy
+	res := mustGet(t, srv.URL+"/things/123", nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("unexpected status: %%d", res.StatusCode)
+	}
+	got := decodeThing(t, res.Body)
+	if got.ID != "123" {
+		t.Fatalf("unexpected id: %%q", got.ID)
+	}
+}
+
 func TestPlayback_UnaryFallbackAndLoopbackBypass(t *testing.T) {
 	stubRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte("{\"upstream\":\"https://example.com\"}\n"), 0600); err != nil {

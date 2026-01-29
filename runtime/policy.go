@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 )
 
 // QueryVariantEnabled returns (enabled, explicit) for endpoints[name].variant.query.
@@ -77,6 +78,33 @@ func (p *Policy) ClearVariantQuery(endpointName string) {
 		return
 	}
 	p.Endpoints[endpointName] = ep
+}
+
+// Validate checks that the policy is valid.
+// It ensures that authorization.claims values are JSON scalars only.
+func (p Policy) Validate() error {
+	if p.Authorization == nil || len(p.Authorization.Claims) == 0 {
+		return nil
+	}
+	for claimName, claimValue := range p.Authorization.Claims {
+		if !isJSONScalar(claimValue) {
+			return fmt.Errorf("authorization.claims.%s: value must be a JSON scalar (string, number, bool, null), got %T", claimName, claimValue)
+		}
+	}
+	return nil
+}
+
+// isJSONScalar returns true if v is a JSON scalar (string, number, bool, null).
+func isJSONScalar(v any) bool {
+	if v == nil {
+		return true
+	}
+	kind := reflect.TypeOf(v).Kind()
+	return kind == reflect.String ||
+		kind == reflect.Bool ||
+		kind == reflect.Int || kind == reflect.Int8 || kind == reflect.Int16 || kind == reflect.Int32 || kind == reflect.Int64 ||
+		kind == reflect.Uint || kind == reflect.Uint8 || kind == reflect.Uint16 || kind == reflect.Uint32 || kind == reflect.Uint64 ||
+		kind == reflect.Float32 || kind == reflect.Float64
 }
 
 // WritePolicy persists the current policy to Root/vcr.json.
