@@ -74,6 +74,7 @@ func Generate(genpkg string, roots []eval.Root, files []*codegen.File) ([]*codeg
 			}
 			spec := vcrgen.BuildServiceSpec(genpkg, svc)
 			f := vcrgen.RenderServiceVCR(spec)
+			cli := vcrgen.RenderServiceVCRCLI(spec)
 			// Ensure we import any extra packages required by the service types.
 			// This includes:
 			// - user types generated into separate packages via "struct:pkg:path"
@@ -85,7 +86,7 @@ func Generate(genpkg string, roots []eval.Root, files []*codegen.File) ([]*codeg
 				}
 				service.AddUserTypeImports(genpkg, f.SectionTemplates[0], svc.Service)
 			}
-			files = append(files, f)
+			files = append(files, f, cli)
 			seen[name] = struct{}{}
 		}
 	}

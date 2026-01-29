@@ -393,6 +393,34 @@ func mustWSURL(t *testing.T, base string, path string) string {
 }
 `, mod))
 
+	// Add a smoke test that imports and exercises the generated CLI core.
+	writeFile(t, filepath.Join(tmp, "toy_cli_smoke_test.go"), fmt.Sprintf(`package toyint
+
+import (
+	"os"
+	"testing"
+
+	toyvcr "%[1]s/gen/http/toy/vcr"
+)
+
+func TestVCRCLI_Usage(t *testing.T) {
+	code := toyvcr.RunCLI([]string{"help"}, toyvcr.CLIConfig{
+		AppName:          "toy-vcr",
+		ScenarioRegistry: map[string]toyvcr.ScenarioFactory{},
+		DefaultPort:      8080,
+		DefaultUpstream:  "https://example.com",
+		DefaultScenario:  "Noop",
+		DefaultMaxVariants: 5,
+	})
+	if code != 0 {
+		t.Fatalf("expected exit code 0, got %%d", code)
+	}
+	if os.Getenv("NEVER_SET") == "should-not-happen" {
+		t.Fatalf("unreachable")
+	}
+}
+`, mod))
+
 	// Compile + run the generated + smoke tests.
 	run(t, tmp, "go", "test", "./...")
 }
