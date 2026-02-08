@@ -43,14 +43,14 @@ func RenderServiceVCR(spec ServiceSpec) *codegen.File {
 	sections := []*codegen.SectionTemplate{
 		codegen.Header("vcr", "vcr", imports),
 		{
-			Name:    "vcr",
-			Source:  vcrTmpl,
+			Name:   "vcr",
+			Source: vcrTmpl,
 			FuncMap: func() map[string]any {
 				fm := codegen.TemplateFuncs()
 				fm["routesCount"] = routesCount
 				return fm
 			}(),
-			Data:    spec,
+			Data: spec,
 		},
 	}
 
@@ -175,22 +175,24 @@ func viewFromPayload(p any) string {
 }
 {{- end }}
 
-// Background uses a stub-backed HTTP client to decode stubbed responses into
-// typed Goa results.
-type Background struct {
-	client *httpclient.Client
-}
-
-func NewBackground(store *vcrruntime.VCR) *Background {
+// NewBackgroundClient returns a protocol-agnostic service client backed by
+// stub responses. The returned client decodes stubbed HTTP responses into
+// concrete Goa result types.
+func NewBackgroundClient(store *vcrruntime.VCR) *{{ .ServicePkgName }}.Client {
 	doer := vcrruntime.NewStubDoer(store, Endpoints())
 	// The scheme/host are irrelevant as StubDoer matches on verb+path.
 	scheme := "http"
 	host := "vcr.local"
 	{{- if .HasWebSocket }}
-	return &Background{client: httpclient.NewClient(scheme, host, doer, goahttp.RequestEncoder, goahttp.ResponseDecoder, false, nil, nil)}
+	hc := httpclient.NewClient(scheme, host, doer, goahttp.RequestEncoder, goahttp.ResponseDecoder, false, nil, nil)
 	{{- else }}
-	return &Background{client: httpclient.NewClient(scheme, host, doer, goahttp.RequestEncoder, goahttp.ResponseDecoder, false)}
+	hc := httpclient.NewClient(scheme, host, doer, goahttp.RequestEncoder, goahttp.ResponseDecoder, false)
 	{{- end }}
+	return &{{ .ServicePkgName }}.Client{
+		{{- range .Endpoints }}
+		{{ .MethodVarName }}Endpoint: hc.{{ .MethodVarName }}(),
+		{{- end }}
+	}
 }
 
 // PlaybackOptions configures playback handler generation.
@@ -204,7 +206,7 @@ func NewPlaybackHandler(store *vcrruntime.VCR, scenario Scenario, opts PlaybackO
 	if store == nil {
 		return nil, errors.New("vcr: nil store")
 	}
-	bg := NewBackground(store)
+	bg := NewBackgroundClient(store)
 	mux := goahttp.NewMuxer()
 
 	eps := &{{ .ServicePkgName }}.Endpoints{
@@ -256,8 +258,7 @@ func (s *Scenario) Add{{ .MethodVarName }}(f Service{{ .MethodVarName }}Func) {
 }
 
 {{ if .IsStreaming }}
-func makeEndpoint{{ .MethodVarName }}(_ *vcrruntime.VCR, scenario Scenario, bg *Background, _ PlaybackOptions) goa.Endpoint {
-	_ = bg
+func makeEndpoint{{ .MethodVarName }}(_ *vcrruntime.VCR, scenario Scenario, _ *{{ $.ServicePkgName }}.Client, _ PlaybackOptions) goa.Endpoint {
 	return func(ctx context.Context, v any) (any, error) {
 		in, ok := v.(*{{ $.ServicePkgName }}.{{ .MethodVarName }}EndpointInput)
 		if !ok || in == nil {
@@ -275,21 +276,7 @@ func makeEndpoint{{ .MethodVarName }}(_ *vcrruntime.VCR, scenario Scenario, bg *
 	}
 }
 {{ else if and .ResultRef .ViewedResultInitName }}
-func (b *Background) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, error) {
-	var zero {{ .ResultRef }}
-	ep := b.client.{{ .MethodVarName }}()
-	res, err := ep(ctx, p)
-	if err != nil {
-		return zero, err
-	}
-	typed, ok := res.({{ .ResultRef }})
-	if !ok {
-		return zero, fmt.Errorf("vcr: unexpected {{ .MethodVarName }} response %T", res)
-	}
-	return typed, nil
-}
-
-func makeEndpoint{{ .MethodVarName }}(_ *vcrruntime.VCR, scenario Scenario, bg *Background, _ PlaybackOptions) goa.Endpoint {
+func makeEndpoint{{ .MethodVarName }}(_ *vcrruntime.VCR, scenario Scenario, bg *{{ $.ServicePkgName }}.Client, _ PlaybackOptions) goa.Endpoint {
 	return func(ctx context.Context, v any) (any, error) {
 		p, ok := v.({{ .PayloadRef }})
 		if !ok {
@@ -327,21 +314,7 @@ func makeEndpoint{{ .MethodVarName }}(_ *vcrruntime.VCR, scenario Scenario, bg *
 	}
 }
 {{ else if .ResultRef }}
-func (b *Background) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, error) {
-	var zero {{ .ResultRef }}
-	ep := b.client.{{ .MethodVarName }}()
-	res, err := ep(ctx, p)
-	if err != nil {
-		return zero, err
-	}
-	typed, ok := res.({{ .ResultRef }})
-	if !ok {
-		return zero, fmt.Errorf("vcr: unexpected {{ .MethodVarName }} response %T", res)
-	}
-	return typed, nil
-}
-
-func makeEndpoint{{ .MethodVarName }}(_ *vcrruntime.VCR, scenario Scenario, bg *Background, _ PlaybackOptions) goa.Endpoint {
+func makeEndpoint{{ .MethodVarName }}(_ *vcrruntime.VCR, scenario Scenario, bg *{{ $.ServicePkgName }}.Client, _ PlaybackOptions) goa.Endpoint {
 	return func(ctx context.Context, v any) (any, error) {
 		p, ok := v.({{ .PayloadRef }})
 		if !ok {
@@ -362,13 +335,7 @@ func makeEndpoint{{ .MethodVarName }}(_ *vcrruntime.VCR, scenario Scenario, bg *
 	}
 }
 {{ else }}
-func (b *Background) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) error {
-	ep := b.client.{{ .MethodVarName }}()
-	_, err := ep(ctx, p)
-	return err
-}
-
-func makeEndpoint{{ .MethodVarName }}(_ *vcrruntime.VCR, scenario Scenario, bg *Background, _ PlaybackOptions) goa.Endpoint {
+func makeEndpoint{{ .MethodVarName }}(_ *vcrruntime.VCR, scenario Scenario, bg *{{ $.ServicePkgName }}.Client, _ PlaybackOptions) goa.Endpoint {
 	return func(ctx context.Context, v any) (any, error) {
 		p, ok := v.({{ .PayloadRef }})
 		if !ok {
