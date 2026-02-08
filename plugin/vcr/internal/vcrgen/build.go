@@ -44,6 +44,9 @@ func BuildServiceSpec(genpkg string, svc *httpcodegen.ServiceData) ServiceSpec {
 			ViewedResultViewName: viewedViewName,
 		}
 		for _, r := range ed.Routes {
+			if r.Verb == "OPTIONS" {
+				continue // Skip CORS preflight mounts.
+			}
 			ep.Routes = append(ep.Routes, RouteSpec{Verb: r.Verb, Path: r.Path})
 		}
 		spec.Endpoints = append(spec.Endpoints, ep)
@@ -71,4 +74,3 @@ func qualifyTypeRef(pkgName, ref string) string {
 		return pkgName + "." + ref
 	}
 }
-

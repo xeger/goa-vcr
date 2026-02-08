@@ -66,15 +66,11 @@ func Endpoints() []vcrruntime.Endpoint {
 	{{- range .Endpoints }}
 		{{- $m := .MethodVarName }}
 		{{- range .Routes }}
-	if {{ printf "%q" .Verb }} == http.MethodOptions {
-		// Ignore CORS preflight/OPTIONS mounts.
-	} else {
-		endpoints = append(endpoints, vcrruntime.Endpoint{
-			Name:    {{ printf "%q" $m }},
-			Method:  {{ printf "%q" .Verb }},
-			Pattern: {{ printf "%q" .Path }},
-		})
-	}
+	endpoints = append(endpoints, vcrruntime.Endpoint{
+		Name:    {{ printf "%q" $m }},
+		Method:  {{ printf "%q" .Verb }},
+		Pattern: {{ printf "%q" .Path }},
+	})
 		{{- end }}
 	{{- end }}
 	return endpoints
@@ -404,4 +400,3 @@ func routesCount(endpoints []EndpointSpec) int {
 	}
 	return n
 }
-
