@@ -35,13 +35,14 @@ func BuildServiceSpec(genpkg string, svc *httpcodegen.ServiceData) ServiceSpec {
 		}
 
 		ep := EndpointSpec{
-			MethodName:    ed.Method.Name,
-			MethodVarName: ed.Method.VarName,
-			PayloadRef:    payloadRef,
-			ResultRef:     resultRef,
-			IsStreaming:   httpcodegen.IsWebSocketEndpoint(ed) || httpcodegen.IsSSEEndpoint(ed),
-			ViewedResultInitName: viewedInitName,
-			ViewedResultViewName: viewedViewName,
+			MethodName:                   ed.Method.Name,
+			MethodVarName:                ed.Method.VarName,
+			PayloadRef:                   payloadRef,
+			ResultRef:                    resultRef,
+			IsStreaming:                  httpcodegen.IsWebSocketEndpoint(ed) || httpcodegen.IsSSEEndpoint(ed),
+			ViewedResultInitName:         viewedInitName,
+			ViewedResultViewName:         viewedViewName,
+			SkipResponseBodyEncodeDecode: ed.Method.SkipResponseBodyEncodeDecode,
 		}
 		for _, r := range ed.Routes {
 			if r.Verb == "OPTIONS" {

@@ -243,6 +243,8 @@ func NewPlaybackHandler(store *vcrruntime.VCR, scenario Scenario, opts PlaybackO
 // Service{{ .MethodVarName }}Func is the typed scenario handler signature for {{ .MethodVarName }}.
 {{- if .IsStreaming }}
 type Service{{ .MethodVarName }}Func func(context.Context, {{ .PayloadRef }}, {{ $.ServicePkgName }}.{{ .MethodVarName }}ServerStream) error
+{{- else if .SkipResponseBodyEncodeDecode }}
+type Service{{ .MethodVarName }}Func goa.Endpoint
 {{- else if .ResultRef }}
 type Service{{ .MethodVarName }}Func func(context.Context, {{ .PayloadRef }}) ({{ .ResultRef }}, error)
 {{- else }}
@@ -273,6 +275,25 @@ func makeEndpoint{{ .MethodVarName }}(_ *vcrruntime.VCR, scenario Scenario, _ *{
 			return nil, fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", handler)
 		}
 		return nil, f(ctx, in.Payload, in.Stream)
+	}
+}
+{{ else if .SkipResponseBodyEncodeDecode }}
+// {{ .MethodVarName }} uses SkipResponseBodyEncodeDecode; call the raw endpoint
+// to preserve the ResponseData wrapper expected by the Goa HTTP server.
+func makeEndpoint{{ .MethodVarName }}(_ *vcrruntime.VCR, scenario Scenario, bg *{{ $.ServicePkgName }}.Client, _ PlaybackOptions) goa.Endpoint {
+	return func(ctx context.Context, v any) (any, error) {
+		if vcrruntime.IsLoopback(ctx) {
+			return bg.{{ .MethodVarName }}Endpoint(ctx, v)
+		}
+		handler := scenario.Next("{{ .MethodVarName }}")
+		if handler != nil {
+			f, ok := handler.(Service{{ .MethodVarName }}Func)
+			if !ok {
+				return nil, fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", handler)
+			}
+			return f(ctx, v)
+		}
+		return bg.{{ .MethodVarName }}Endpoint(ctx, v)
 	}
 }
 {{ else if and .ResultRef .ViewedResultInitName }}

@@ -22,11 +22,15 @@ type EndpointSpec struct {
 	// ViewedResultViewName is the fixed view name to use when the method has at most
 	// one view. Empty when view selection is dynamic.
 	ViewedResultViewName string
-	Routes        []RouteSpec
+	// SkipResponseBodyEncodeDecode is true when the service method returns a raw
+	// io.ReadCloser for the HTTP response body. The typed service client method
+	// has extra return values in this case, so makeEndpoint must call the raw
+	// endpoint field instead.
+	SkipResponseBodyEncodeDecode bool
+	Routes                       []RouteSpec
 }
 
 type RouteSpec struct {
 	Verb string
 	Path string
 }
-
