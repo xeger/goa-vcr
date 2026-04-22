@@ -57,7 +57,7 @@ var globalDebug bool
 // CLIConfig controls the generated CLI behavior and defaults.
 type CLIConfig struct {
 	AppName          string
-	ScenarioRegistry map[string]ScenarioFactory
+	ScenarioRegistry map[string]func(*vcrruntime.VCR) {{ .ServicePkgName }}.Service
 	DefaultPort      int
 	DefaultUpstream  string
 	DefaultScenario  string
@@ -138,7 +138,7 @@ func normalizeCLIConfig(cfg CLIConfig) CLIConfig {
 		cfg.DefaultMaxVariants = 5
 	}
 	if cfg.ScenarioRegistry == nil {
-		cfg.ScenarioRegistry = map[string]ScenarioFactory{}
+		cfg.ScenarioRegistry = map[string]func(*vcrruntime.VCR) {{ .ServicePkgName }}.Service{}
 	}
 	return cfg
 }
@@ -215,8 +215,6 @@ func vcrAccessLog(store *vcrruntime.VCR) func(http.Handler) http.Handler {
 			} else if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
 				streamType = "sse"
 			}
-			loopback := vcrruntime.IsLoopback(ctx)
-
 			endpointName, vars, ok := matcher.Match(r)
 			div := ""
 			hasStub := false
@@ -242,9 +240,6 @@ func vcrAccessLog(store *vcrruntime.VCR) func(http.Handler) http.Handler {
 					if streamType != "" {
 						kvs = append(kvs, log.KV{K: "http.stream", V: streamType})
 					}
-					if loopback {
-						kvs = append(kvs, log.KV{K: "vcr.loopback", V: true})
-					}
 					log.Debug(ctx, kvs...)
 				} else {
 					kvs := []log.Fielder{
@@ -258,9 +253,6 @@ func vcrAccessLog(store *vcrruntime.VCR) func(http.Handler) http.Handler {
 					}
 					if streamType != "" {
 						kvs = append(kvs, log.KV{K: "http.stream", V: streamType})
-					}
-					if loopback {
-						kvs = append(kvs, log.KV{K: "vcr.loopback", V: true})
 					}
 					log.Debug(ctx, kvs...)
 				}
@@ -486,22 +478,16 @@ func cmdPlay(args []string, cfg CLIConfig) int {
 	}
 
 	addr := fmt.Sprintf("127.0.0.1:%d", *portFlag)
-	baseURL := fmt.Sprintf("http://%s", addr)
 
-	factory, ok := cfg.ScenarioRegistry[*scenarioFlag]
+	build, ok := cfg.ScenarioRegistry[*scenarioFlag]
 	if !ok {
 		log.Errorf(ctx, fmt.Errorf("unknown scenario %q", *scenarioFlag), "invalid scenario")
 		return 1
 	}
 
-	loopbackDoer := vcrruntime.NewStubDoer(store, Endpoints())
-	sc, _, err := BuildScenario(baseURL, loopbackDoer, factory)
-	if err != nil {
-		log.Errorf(ctx, err, "failed to build scenario")
-		return 1
-	}
+	svc := build(store)
 
-	h, err := NewPlaybackHandler(store, sc, PlaybackOptions{ScenarioName: *scenarioFlag})
+	h, err := NewPlaybackHandler(svc)
 	if err != nil {
 		log.Errorf(ctx, err, "failed to build playback handler")
 		return 1

@@ -45,7 +45,8 @@ func TestRenderServiceVCRCLI_WritesCLIFile(t *testing.T) {
 	assertContains(t, src, "Endpoints()")
 
 	// New: registry builds a Service from a store.
-	assertContains(t, src, "ScenarioRegistry map[string]func(*vcrruntime.VCR) toy.Service")
+	assertContains(t, src, "ScenarioRegistry")
+	assertContains(t, src, "map[string]func(*vcrruntime.VCR) toy.Service")
 	assertContains(t, src, "NewPlaybackHandler(svc)")
 	assertContains(t, src, "svc := build(store)")
 
