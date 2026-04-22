@@ -223,36 +223,36 @@ func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .Payl
 }
 {{ else if and .ResultRef .ViewedResultInitName }}
 // {{ .MethodVarName }} dispatches to the handler queue (if any) or delegates.
-// Handlers return the plain result type; this method wraps to the viewed type
-// expected by the Service interface.
-func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, error) {
+// Handlers return the plain result type and the selected view name; the Goa
+// endpoint layer (NewEndpoints) is responsible for wrapping to the viewed type.
+func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, string, error) {
 	if h := s.queue.Next("{{ .MethodVarName }}"); h != nil {
 		fn, ok := h.(Service{{ .MethodVarName }}Func)
 		if !ok {
-			return nil, fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", h)
+			return nil, "", fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", h)
 		}
 		res, err := fn(ctx, p, s.next)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		{{- if .ViewedResultViewName }}
-		return {{ $.ServicePkgName }}.{{ .ViewedResultInitName }}(res, {{ printf "%q" .ViewedResultViewName }}), nil
+		return res, {{ printf "%q" .ViewedResultViewName }}, nil
 		{{- else }}
-		return {{ $.ServicePkgName }}.{{ .ViewedResultInitName }}(res, viewFromPayload(p)), nil
+		return res, viewFromPayload(p), nil
 		{{- end }}
 	}
 	return s.next.{{ .MethodVarName }}(ctx, p)
 }
 
-func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, error) {
+func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, string, error) {
 	res, err := b.hc.{{ .MethodVarName }}(ctx, p)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	{{- if .ViewedResultViewName }}
-	return {{ $.ServicePkgName }}.{{ .ViewedResultInitName }}(res, {{ printf "%q" .ViewedResultViewName }}), nil
+	return res, {{ printf "%q" .ViewedResultViewName }}, nil
 	{{- else }}
-	return {{ $.ServicePkgName }}.{{ .ViewedResultInitName }}(res, viewFromPayload(p)), nil
+	return res, viewFromPayload(p), nil
 	{{- end }}
 }
 {{ else if .ResultRef }}

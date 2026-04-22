@@ -161,10 +161,12 @@ func TestRenderServiceVCR_ViewedResultWrapsInsideScenarioAndBackground(t *testin
 	assertContains(t, src, `"reflect"`)
 	assertContains(t, src, `func viewFromPayload`)
 
-	// Background wraps plain to viewed using NewViewed*.
-	assertContains(t, src, `return toyviews.NewViewedThingWithViews(res, viewFromPayload(p)), nil`)
+	// Background returns plain result + view name; the Goa endpoint layer wraps.
+	assertContains(t, src, `return res, viewFromPayload(p), nil`)
 
-	// Scenario handler also returns plain; Scenario's method wraps to viewed.
+	// Scenario method returns (ResultRef, string, error); handler func returns plain.
+	assertContains(t, src, `func (s *Scenario) GetThingViewed(ctx context.Context, p *toyviews.GetThingViewedPayload) (*toyviews.ThingWithViews, string, error)`)
+	assertContains(t, src, `func (b *backgroundService) GetThingViewed(ctx context.Context, p *toyviews.GetThingViewedPayload) (*toyviews.ThingWithViews, string, error)`)
 	assertContains(t, src, `type ServiceGetThingViewedFunc func(context.Context, *toyviews.GetThingViewedPayload, toyviews.Service) (*toyviews.ThingWithViews, error)`)
 }
 

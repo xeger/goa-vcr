@@ -29,6 +29,7 @@ func RenderServiceVCRCLI(spec ServiceSpec) *codegen.File {
 
 		codegen.NewImport("vcrruntime", "github.com/xeger/goa-vcr/runtime"),
 		codegen.NewImport("log", "goa.design/clue/log"),
+		codegen.NewImport(spec.ServicePkgName, filepath.ToSlash(filepath.Join(spec.GenPkg, spec.ServicePathName))),
 	}
 
 	sort.SliceStable(imports, func(i, j int) bool {
