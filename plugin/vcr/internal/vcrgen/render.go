@@ -184,13 +184,15 @@ func NewPlaybackHandler(svc {{ .ServicePkgName }}.Service) (http.Handler, error)
 	return mux, nil
 }
 
-{{ range .Endpoints }}
+{{- range .Endpoints }}
 
 // Service{{ .MethodVarName }}Func is the typed scenario handler signature for {{ .MethodVarName }}.
 {{- if .IsStreaming }}
 type Service{{ .MethodVarName }}Func func(context.Context, {{ .PayloadRef }}, {{ $.ServicePkgName }}.{{ .MethodVarName }}ServerStream) error
-{{- else }}
+{{- else if .ResultRef }}
 type Service{{ .MethodVarName }}Func func(context.Context, {{ .PayloadRef }}, {{ $.ServicePkgName }}.Service) ({{ .ResultRef }}, error)
+{{- else }}
+type Service{{ .MethodVarName }}Func func(context.Context, {{ .PayloadRef }}, {{ $.ServicePkgName }}.Service) error
 {{- end }}
 
 func (s *Scenario) Set{{ .MethodVarName }}(f Service{{ .MethodVarName }}Func) {
@@ -275,7 +277,7 @@ func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}
 		if !ok {
 			return fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", h)
 		}
-		_, err := fn(ctx, p, s.next)
+		err := fn(ctx, p, s.next)
 		return err
 	}
 	return s.next.{{ .MethodVarName }}(ctx, p)
@@ -285,8 +287,7 @@ func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .Payl
 	return b.hc.{{ .MethodVarName }}(ctx, p)
 }
 {{ end }}
-
-{{ end }}
+{{- end }}
 `
 
 func routesCount(endpoints []EndpointSpec) int {
