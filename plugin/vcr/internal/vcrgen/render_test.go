@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestRenderServiceVCR_UnaryDispatchIncludesLoopbackBypassAndFallback(t *testing.T) {
+func TestRenderServiceVCR_UnaryEmitsScenarioAsService(t *testing.T) {
 	spec := ServiceSpec{
 		GenPkg:          "github.com/example/proj/gen",
 		ServicePathName: "toy",
@@ -40,16 +40,48 @@ func TestRenderServiceVCR_UnaryDispatchIncludesLoopbackBypassAndFallback(t *test
 	}
 	src := string(data)
 
-	assertContains(t, src, `func makeEndpointGetThing`)
-	assertContains(t, src, `if vcrruntime.IsLoopback(ctx)`)
-	assertContains(t, src, `handler := scenario.Next("GetThing")`)
-	assertContains(t, src, `return bg.GetThing(ctx, p)`)
-	assertContains(t, src, `type ServiceGetThingFunc`)
-	assertContains(t, src, `func (s *Scenario) SetGetThing`)
-	assertContains(t, src, `func (s *Scenario) AddGetThing`)
+	// Scenario becomes a Service implementation.
+	assertContains(t, src, `type Scenario struct {`)
+	assertContains(t, src, `queue vcrruntime.Scenario`)
+	assertContains(t, src, `next  toy.Service`)
+	assertContains(t, src, `func NewScenario(next toy.Service) *Scenario`)
+
+	// Per-method typed handler + Set/Add + dispatch method.
+	assertContains(t, src, `type ServiceGetThingFunc func(context.Context, *toy.GetThingPayload, toy.Service) (*toy.Thing, error)`)
+	assertContains(t, src, `func (s *Scenario) SetGetThing(f ServiceGetThingFunc)`)
+	assertContains(t, src, `func (s *Scenario) AddGetThing(f ServiceGetThingFunc)`)
+	assertContains(t, src, `func (s *Scenario) GetThing(ctx context.Context, p *toy.GetThingPayload) (*toy.Thing, error)`)
+	assertContains(t, src, `if h := s.queue.Next("GetThing"); h != nil`)
+	assertContains(t, src, `return fn(ctx, p, s.next)`)
+	assertContains(t, src, `return s.next.GetThing(ctx, p)`)
+
+	// Background is a Service implementation, not *toy.Client.
+	assertContains(t, src, `type backgroundService struct {`)
+	assertContains(t, src, `hc *toy.Client`)
+	assertContains(t, src, `func NewBackground(store *vcrruntime.VCR) toy.Service`)
+	assertContains(t, src, `func (b *backgroundService) GetThing(ctx context.Context, p *toy.GetThingPayload) (*toy.Thing, error)`)
+	assertContains(t, src, `return b.hc.GetThing(ctx, p)`)
+
+	// Stack helper.
+	assertContains(t, src, `func Stack(bg toy.Service, layers ...func(toy.Service) toy.Service) toy.Service`)
+
+	// Simplified NewPlaybackHandler.
+	assertContains(t, src, `func NewPlaybackHandler(svc toy.Service) (http.Handler, error)`)
+	assertContains(t, src, `eps := toy.NewEndpoints(svc)`)
+
+	// Removed surface must be absent.
+	assertNotContains(t, src, `IsLoopback`)
+	assertNotContains(t, src, `LoopbackHeader`)
+	assertNotContains(t, src, `LoopbackMiddleware`)
+	assertNotContains(t, src, `NewLoopbackClient`)
+	assertNotContains(t, src, `loopbackDoer`)
+	assertNotContains(t, src, `BuildScenario`)
+	assertNotContains(t, src, `type ScenarioFactory`)
+	assertNotContains(t, src, `PlaybackOptions`)
+	assertNotContains(t, src, `makeEndpoint`)
 }
 
-func TestRenderServiceVCR_WebSocketUsesUpgrader(t *testing.T) {
+func TestRenderServiceVCR_StreamingHandlerStaysTerminal(t *testing.T) {
 	spec := ServiceSpec{
 		GenPkg:          "github.com/example/proj/gen",
 		ServicePathName: "toyws",
@@ -78,13 +110,22 @@ func TestRenderServiceVCR_WebSocketUsesUpgrader(t *testing.T) {
 	}
 	src := string(data)
 
+	// Handler signature is terminal (no next arg).
+	assertContains(t, src, `type ServiceStreamThingsFunc func(context.Context, *toyws.StreamThingsPayload, toyws.StreamThingsServerStream) error`)
+	assertContains(t, src, `func (s *Scenario) StreamThings(ctx context.Context, p *toyws.StreamThingsPayload, stream toyws.StreamThingsServerStream) error`)
+	assertContains(t, src, `return fn(ctx, p, stream)`)
+	assertContains(t, src, `return s.next.StreamThings(ctx, p, stream)`)
+
+	// Background returns an explicit "no recorded stream" error.
+	assertContains(t, src, `func (b *backgroundService) StreamThings(ctx context.Context, p *toyws.StreamThingsPayload, stream toyws.StreamThingsServerStream) error`)
+	assertContains(t, src, `"vcr: no scenario handler for StreamThings and no recorded-stream background is available"`)
+
+	// WebSocket upgrader still wired.
 	assertContains(t, src, `upgrader := &websocket.Upgrader{`)
 	assertContains(t, src, `server.Mount(mux)`)
-	assertContains(t, src, `v.(*toyws.StreamThingsEndpointInput)`)
-	assertContains(t, src, `return nil, f(ctx, in.Payload, in.Stream)`)
 }
 
-func TestRenderServiceVCR_UnaryViewedResultWrapsWithNewViewed(t *testing.T) {
+func TestRenderServiceVCR_ViewedResultWrapsInsideScenarioAndBackground(t *testing.T) {
 	spec := ServiceSpec{
 		GenPkg:          "github.com/example/proj/gen",
 		ServicePathName: "toyviews",
@@ -93,13 +134,13 @@ func TestRenderServiceVCR_UnaryViewedResultWrapsWithNewViewed(t *testing.T) {
 		HasViewedResult: true,
 		Endpoints: []EndpointSpec{
 			{
-				MethodVarName:         "GetThingViewed",
-				PayloadRef:            "*toyviews.GetThingViewedPayload",
-				ResultRef:             "*toyviews.ThingWithViews",
-				IsStreaming:           false,
-				ViewedResultInitName:  "NewViewedThingWithViews",
-				ViewedResultViewName:  "",
-				Routes:                []RouteSpec{{Verb: "GET", Path: "/things/{id}/viewed"}},
+				MethodVarName:        "GetThingViewed",
+				PayloadRef:           "*toyviews.GetThingViewedPayload",
+				ResultRef:            "*toyviews.ThingWithViews",
+				IsStreaming:          false,
+				ViewedResultInitName: "NewViewedThingWithViews",
+				ViewedResultViewName: "",
+				Routes:               []RouteSpec{{Verb: "GET", Path: "/things/{id}/viewed"}},
 			},
 		},
 	}
@@ -116,16 +157,27 @@ func TestRenderServiceVCR_UnaryViewedResultWrapsWithNewViewed(t *testing.T) {
 	}
 	src := string(data)
 
-	assertContains(t, src, `import (`) // sanity
+	// viewFromPayload helper retained for dynamic view selection.
 	assertContains(t, src, `"reflect"`)
 	assertContains(t, src, `func viewFromPayload`)
+
+	// Background wraps plain to viewed using NewViewed*.
 	assertContains(t, src, `return toyviews.NewViewedThingWithViews(res, viewFromPayload(p)), nil`)
+
+	// Scenario handler also returns plain; Scenario's method wraps to viewed.
+	assertContains(t, src, `type ServiceGetThingViewedFunc func(context.Context, *toyviews.GetThingViewedPayload, toyviews.Service) (*toyviews.ThingWithViews, error)`)
 }
 
 func assertContains(t *testing.T, haystack, needle string) {
 	t.Helper()
 	if !strings.Contains(haystack, needle) {
-		t.Fatalf("expected output to contain %q", needle)
+		t.Fatalf("expected output to contain %q\n--- output ---\n%s\n--- end ---", needle, haystack)
 	}
 }
 
+func assertNotContains(t *testing.T, haystack, needle string) {
+	t.Helper()
+	if strings.Contains(haystack, needle) {
+		t.Fatalf("expected output NOT to contain %q\n--- output ---\n%s\n--- end ---", needle, haystack)
+	}
+}
