@@ -129,9 +129,6 @@ func normalizeCLIConfig(cfg CLIConfig) CLIConfig {
 	if cfg.DefaultPort == 0 {
 		cfg.DefaultPort = 8084
 	}
-	if cfg.DefaultUpstream == "" {
-		cfg.DefaultUpstream = "https://atlaslive.io"
-	}
 	if cfg.DefaultScenario == "" {
 		cfg.DefaultScenario = "Noop"
 	}

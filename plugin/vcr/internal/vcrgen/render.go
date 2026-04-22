@@ -277,8 +277,7 @@ func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}
 		if !ok {
 			return fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", h)
 		}
-		err := fn(ctx, p, s.next)
-		return err
+		return fn(ctx, p, s.next)
 	}
 	return s.next.{{ .MethodVarName }}(ctx, p)
 }
