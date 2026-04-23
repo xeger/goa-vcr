@@ -46,9 +46,13 @@ func TestRenderServiceVCRCLI_WritesCLIFile(t *testing.T) {
 
 	// New: registry builds a Service from a store.
 	assertContains(t, src, "ScenarioRegistry")
-	assertContains(t, src, "map[string]func(*vcrruntime.VCR) toy.Service")
-	assertContains(t, src, "NewPlaybackHandler(svc)")
-	assertContains(t, src, "svc := build(store)")
+	assertContains(t, src, "map[string]func(toy.Service) toy.Service")
+	assertContains(t, src, "DefaultScenarios []string")
+	assertContains(t, src, "scenarioFlag := scenarioListFlag{}")
+	assertContains(t, src, `fs.Var(&scenarioFlag, "scenario", "Scenario name (repeat for outer-to-inner stack)")`)
+	assertContains(t, src, "vcrruntime.NewActiveScenarios(")
+	assertContains(t, src, `mux.HandleFunc("/__vcr__/scenarios", controller.HandleScenarios)`)
+	assertContains(t, src, `mux.HandleFunc("/__vcr__/scenarios/active", controller.HandleActiveScenarios)`)
 
 	// Removed: loopback plumbing.
 	assertNotContains(t, src, "BuildScenario(")

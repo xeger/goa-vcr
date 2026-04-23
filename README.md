@@ -90,22 +90,62 @@ Stream wrapping (intercepting `Send`/`Recv`) is planned for a future release.
 
 ### CLI scenario registry
 
-The generated CLI's `--scenario <name>` flag selects a named entry from the registry. Each entry is a complete playback definition:
+The generated CLI accepts repeatable `--scenario <name>` flags to define an
+ordered active stack at startup. Scenario objects are applied outer-first:
+`--scenario Happy --scenario Sad` means `Stack(bg, Happy, Sad)`.
+
+If `--scenario` is omitted, `DefaultScenarios` is used. `DefaultScenario`
+remains as a single-entry compatibility fallback.
+
+Registry entries are layer constructors:
 
 ```go
 cfg := toyvcr.CLIConfig{
     AppName: "toy-vcr",
-    ScenarioRegistry: map[string]func(*vcrruntime.VCR) toy.Service{
-        "happy": func(store *vcrruntime.VCR) toy.Service {
-            bg := toyvcr.NewBackground(store)
-            return toyvcr.Stack(bg, addLogging, patchSingle)
+    ScenarioRegistry: map[string]func(toy.Service) toy.Service{
+        "happy": func(next toy.Service) toy.Service {
+            s := toyvcr.NewScenario(next)
+            s.SetGetThing(func(ctx context.Context, p *toy.GetThingPayload, next toy.Service) (*toy.Thing, error) {
+                t, err := next.GetThing(ctx, p)
+                if err != nil { return nil, err }
+                t.Name = "happy-" + t.Name
+                return t, nil
+            })
+            return s
         },
-        "bare": toyvcr.NewBackground,
+        "sad": patchSingle,
+        "noop": func(next toy.Service) toy.Service { return next },
     },
-    DefaultScenario: "bare",
+    DefaultScenarios: []string{"happy", "sad"},
 }
 os.Exit(toyvcr.RunCLI(os.Args[1:], cfg))
 ```
+
+### Runtime scenario control API
+
+Playback servers expose an admin API for runtime stack changes:
+
+- `GET /__vcr__/scenarios` returns:
+  - `registered`: known scenario names
+  - `default`: startup default stack
+  - `active`: current active stack
+- `PUT /__vcr__/scenarios/active` replaces the active stack.
+- `DELETE /__vcr__/scenarios/active` restores startup defaults.
+
+Request body for `PUT` is an ordered array of objects:
+
+```json
+[
+  {"name": "Happy"},
+  {"name": "Sad"}
+]
+```
+
+Semantics:
+
+- `PUT` fully replaces the current active stack.
+- `PUT []` is valid and means background-only playback.
+- `DELETE /__vcr__/scenarios/active` restores `DefaultScenarios`.
 
 ### VCR Policy (`vcr.json`)
 
