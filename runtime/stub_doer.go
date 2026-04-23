@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -30,14 +31,14 @@ func (d *StubDoer) Do(req *http.Request) (*http.Response, error) {
 
 	endpointName, vars, ok := d.Matcher.Match(req)
 	if !ok {
-		return vcrErrorResponse(req, http.StatusNotImplemented, "vcr: unstubbed endpoint"), nil
+		return vcrErrorResponse(req, http.StatusNotImplemented, fmt.Sprintf("vcr: unrecognized route: %s %s", req.Method, req.URL.Path)), nil
 	}
 
 	div := RequestDiversifier(d.Store.Policy, endpointName, req.URL.Query(), vars)
 	meta, body, err := d.Store.ReadResponse(endpointName, div)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return vcrErrorResponse(req, http.StatusNotImplemented, "vcr: unstubbed endpoint"), nil
+			return vcrErrorResponse(req, http.StatusNotImplemented, fmt.Sprintf("vcr: unstubbed endpoint: missing %s", StubHARFileName(endpointName, div))), nil
 		}
 		return vcrErrorResponse(req, http.StatusInternalServerError, "vcr: failed to read stub"), nil
 	}

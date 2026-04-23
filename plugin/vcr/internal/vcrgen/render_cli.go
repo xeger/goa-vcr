@@ -274,6 +274,7 @@ func vcrAccessLog(store *vcrruntime.VCR) func(http.Handler) http.Handler {
 					log.KV{K: "msg", V: "vcr unstubbed unary request (no stub on disk)"},
 					log.KV{K: "vcr.unstubbed", V: true},
 					log.KV{K: "vcr.endpoint", V: endpointName},
+					log.KV{K: "vcr.stub_file", V: vcrruntime.StubHARFileName(endpointName, div)},
 					log.KV{K: "http.method", V: method},
 					log.KV{K: "http.path", V: path},
 					log.KV{K: "hint", V: "record this endpoint or adjust vcr.json variant settings"},
