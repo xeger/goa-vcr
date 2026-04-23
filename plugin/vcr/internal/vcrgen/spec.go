@@ -5,16 +5,23 @@ type ServiceSpec struct {
 	ServicePathName string
 	ServicePkgName  string
 	HasWebSocket    bool
+	HasRawResponse  bool
+	// HasViewedResult indicates at least one endpoint needs dynamic view lookup
+	// from payload and therefore requires viewFromPayload/reflect support.
 	HasViewedResult bool
-	Endpoints       []EndpointSpec
+	// HasServerInterceptors indicates the service declares server-side interceptors,
+	// in which case the generated NewEndpoints takes a ServerInterceptors argument.
+	HasServerInterceptors bool
+	Endpoints             []EndpointSpec
 }
 
 type EndpointSpec struct {
-	MethodName    string
-	MethodVarName string
-	PayloadRef    string
-	ResultRef     string
-	IsStreaming   bool
+	MethodName     string
+	MethodVarName  string
+	PayloadRef     string
+	ResultRef      string
+	IsStreaming    bool
+	HasRawResponse bool
 	// ViewedResultInitName is the name of the generated helper that constructs the
 	// viewed result wrapper from the service result, e.g. NewViewedOrganizationCollection.
 	// Empty when the method does not return a viewed result.
@@ -22,7 +29,10 @@ type EndpointSpec struct {
 	// ViewedResultViewName is the fixed view name to use when the method has at most
 	// one view. Empty when view selection is dynamic.
 	ViewedResultViewName string
-	Routes               []RouteSpec
+	// ReturnsViewName indicates this endpoint's Service method signature includes a
+	// dynamic view return value: (res, view string, err).
+	ReturnsViewName bool
+	Routes          []RouteSpec
 }
 
 type RouteSpec struct {

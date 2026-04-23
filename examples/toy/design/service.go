@@ -40,6 +40,20 @@ var _ = Service("toy", func() {
 		})
 	})
 
+	Method("get_raw_thing", func() {
+		Payload(func() {
+			Attribute("id", String, "Thing identifier")
+			Required("id")
+		})
+
+		HTTP(func() {
+			GET("/things/{id}/raw")
+			Param("id")
+			SkipResponseBodyEncodeDecode()
+			Response(StatusOK)
+		})
+	})
+
 	Method("stream_things_sse", func() {
 		Payload(func() {
 			Attribute("id", String, "Thing identifier")

@@ -8,10 +8,11 @@ import (
 
 func BuildServiceSpec(genpkg string, svc *httpcodegen.ServiceData) ServiceSpec {
 	spec := ServiceSpec{
-		GenPkg:          genpkg,
-		ServicePathName: svc.Service.PathName,
-		ServicePkgName:  svc.Service.PkgName,
-		HasWebSocket:    httpcodegen.HasWebSocket(svc),
+		GenPkg:                genpkg,
+		ServicePathName:       svc.Service.PathName,
+		ServicePkgName:        svc.Service.PkgName,
+		HasWebSocket:          httpcodegen.HasWebSocket(svc),
+		HasServerInterceptors: len(svc.Service.ServerInterceptors) > 0,
 	}
 
 	for _, ed := range svc.Endpoints {
@@ -28,10 +29,15 @@ func BuildServiceSpec(genpkg string, svc *httpcodegen.ServiceData) ServiceSpec {
 
 		var viewedInitName string
 		var viewedViewName string
+		returnsViewName := false
 		if ed.Method.ViewedResult != nil && ed.Method.ViewedResult.Init != nil {
 			viewedInitName = ed.Method.ViewedResult.Init.Name
 			viewedViewName = ed.Method.ViewedResult.ViewName
-			spec.HasViewedResult = true
+			// Goa emits a view return only when view selection is dynamic.
+			returnsViewName = viewedViewName == ""
+			if returnsViewName {
+				spec.HasViewedResult = true
+			}
 		}
 
 		ep := EndpointSpec{
@@ -40,8 +46,13 @@ func BuildServiceSpec(genpkg string, svc *httpcodegen.ServiceData) ServiceSpec {
 			PayloadRef:           payloadRef,
 			ResultRef:            resultRef,
 			IsStreaming:          httpcodegen.IsWebSocketEndpoint(ed) || httpcodegen.IsSSEEndpoint(ed),
+			HasRawResponse:       ed.Method.SkipResponseBodyEncodeDecode,
 			ViewedResultInitName: viewedInitName,
 			ViewedResultViewName: viewedViewName,
+			ReturnsViewName:      returnsViewName,
+		}
+		if ep.HasRawResponse {
+			spec.HasRawResponse = true
 		}
 		for _, r := range ed.Routes {
 			if r.Verb == "OPTIONS" {

@@ -32,7 +32,7 @@ replace github.com/xeger/goa-vcr => %s
 	run(t, tmp, "go", "list", "-deps", "goa.design/goa/v3/cmd/goa")
 
 	// Generate code into tmp module using the standard Goa tool.
-	run(t, tmp, "go", "run", "goa.design/goa/v3/cmd/goa", "gen", "github.com/xeger/goa-vcr/examples/toy/design", "-o", ".")
+	run(t, tmp, "go", "run", "goa.design/goa/v3/cmd/goa@v3.23.4", "gen", "github.com/xeger/goa-vcr/examples/toy/design", "-o", ".")
 
 	// Add a smoke test that imports and exercises the generated VCR glue.
 	writeFile(t, filepath.Join(tmp, "toy_smoke_test.go"), fmt.Sprintf(`package toyint
@@ -48,6 +48,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gorilla/websocket"
@@ -164,6 +165,43 @@ func TestPlayback_ScenarioOverridesUnary(t *testing.T) {
 	got := decodeThing(t, res.Body)
 	if got.ID != "999" {
 		t.Fatalf("unexpected id: %%q", got.ID)
+	}
+}
+
+func TestPlayback_ScenarioOverridesRawResponseBody(t *testing.T) {
+	stubRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte("{\"upstream\":\"https://example.com\"}\n"), 0600); err != nil {
+		t.Fatalf("write policy: %%v", err)
+	}
+	store, err := vcrruntime.New(stubRoot)
+	if err != nil {
+		t.Fatalf("new store: %%v", err)
+	}
+
+	bg := toyvcr.NewBackground(store)
+	sc := toyvcr.NewScenario(bg)
+	sc.SetGetRawThing(func(ctx context.Context, p *toy.GetRawThingPayload, next toy.Service) (io.ReadCloser, error) {
+		return io.NopCloser(strings.NewReader("raw-" + p.ID)), nil
+	})
+
+	h, err := toyvcr.NewPlaybackHandler(sc)
+	if err != nil {
+		t.Fatalf("handler: %%v", err)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	res := mustGet(t, srv.URL+"/things/456/raw", nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("unexpected status: %%d", res.StatusCode)
+	}
+	got, err := io.ReadAll(res.Body)
+	_ = res.Body.Close()
+	if err != nil {
+		t.Fatalf("read body: %%v", err)
+	}
+	if string(got) != "raw-456" {
+		t.Fatalf("unexpected raw body: %%q", string(got))
 	}
 }
 
