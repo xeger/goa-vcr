@@ -61,7 +61,7 @@ import (
 func TestPlayback_PolicyWithAuthorizationClaims(t *testing.T) {
 	stubRoot := t.TempDir()
 	// Test that policy with authorization.claims loads correctly and doesn't affect playback
-	policyJSON := "{\"upstream\":\"https://example.com\",\"authorization\":{\"claims\":{\"sub\":\"deadbeef\"}}}"
+	policyJSON := "{\"upstream\":\"https://example.com\",\"authorization\":{\"claims\":{\"sub\":\"deadbeef\"}},\"endpoints\":{\"GetThing\":{\"variant\":{\"path\":false}}}}"
 	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte(policyJSON), 0600); err != nil {
 		t.Fatalf("write policy: %%v", err)
 	}
@@ -100,7 +100,7 @@ func TestPlayback_PolicyWithAuthorizationClaims(t *testing.T) {
 
 func TestPlayback_UnaryFallbackAndLoopbackBypass(t *testing.T) {
 	stubRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte("{\"upstream\":\"https://example.com\"}\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte("{\"upstream\":\"https://example.com\",\"endpoints\":{\"GetThing\":{\"variant\":{\"path\":false}}}}\n"), 0600); err != nil {
 		t.Fatalf("write policy: %%v", err)
 	}
 	store, err := vcrruntime.New(stubRoot)
@@ -158,7 +158,7 @@ func TestPlayback_UnaryFallbackAndLoopbackBypass(t *testing.T) {
 
 func TestPlayback_UnaryViewedResult_NoPanicAndRespectsView(t *testing.T) {
 	stubRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte("{\"upstream\":\"https://example.com\",\"endpoints\":{\"GetThingViewed\":{\"variant\":{\"query\":false}}}}\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte("{\"upstream\":\"https://example.com\",\"endpoints\":{\"GetThingViewed\":{\"variant\":{\"query\":false,\"path\":false}}}}\n"), 0600); err != nil {
 		t.Fatalf("write policy: %%v", err)
 	}
 	store, err := vcrruntime.New(stubRoot)

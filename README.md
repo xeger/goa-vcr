@@ -61,7 +61,7 @@ Each VCR stub directory contains a `vcr.json` policy file that configures record
 - **`upstream`** (required): Base URL of the upstream server to proxy to during recording.
 - **`authorization.claims`** (optional): Map of required JWT claim names to their required values. When recording, if an `Authorization: Bearer <token>` header is present, the decoded JWT payload (without signature verification) must contain matching claims. If no `Authorization` header is present, recording proceeds normally. Claim values must be JSON scalars (string, number, bool, null).
 - **`endpoints.<name>.variant.query`** (optional): Controls whether query strings participate in stub variants. Defaults to `true` if not specified.
-- **`endpoints.<name>.variant.path`** (optional): Controls whether route params participate in stub variants. Defaults to `false` if not specified.
+- **`endpoints.<name>.variant.path`** (optional): Controls whether route params participate in stub variants. Defaults to `true` if not specified.
 
 ### Notes
 

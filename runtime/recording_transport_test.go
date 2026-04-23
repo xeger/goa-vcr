@@ -39,7 +39,8 @@ func (c ioNopCloser) Close() error               { return nil }
 
 func TestRecordingTransportVariantHeuristicDisablesQuery(t *testing.T) {
 	tmp := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmp, PolicyFileName), []byte("{\"upstream\":\"https://example.com\"}\n"), 0600); err != nil {
+	// Path variant off so this test only exercises the query-variant max heuristic.
+	if err := os.WriteFile(filepath.Join(tmp, PolicyFileName), []byte("{\"upstream\":\"https://example.com\",\"endpoints\":{\"GetThing\":{\"variant\":{\"path\":false}}}}\n"), 0600); err != nil {
 		t.Fatalf("write policy: %v", err)
 	}
 	store, err := New(tmp)

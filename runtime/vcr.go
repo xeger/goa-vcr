@@ -68,7 +68,7 @@ type (
 		// If nil, query variants are enabled and may be auto-tuned by heuristics.
 		Query *bool `json:"query,omitempty"`
 		// Path controls whether route params participate in stub variants.
-		// If nil, path variants are disabled.
+		// If nil, path variants are enabled.
 		Path *bool `json:"path,omitempty"`
 	}
 )
