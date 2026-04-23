@@ -32,7 +32,7 @@ replace github.com/xeger/goa-vcr => %s
 	run(t, tmp, "go", "list", "-deps", "goa.design/goa/v3/cmd/goa")
 
 	// Generate code into tmp module using the standard Goa tool.
-	run(t, tmp, "go", "run", "goa.design/goa/v3/cmd/goa", "gen", "github.com/xeger/goa-vcr/examples/toy/design", "-o", ".")
+	run(t, tmp, "go", "run", "goa.design/goa/v3/cmd/goa@v3.23.4", "gen", "github.com/xeger/goa-vcr/examples/toy/design", "-o", ".")
 
 	// Add a smoke test that imports and exercises the generated VCR glue.
 	writeFile(t, filepath.Join(tmp, "toy_smoke_test.go"), fmt.Sprintf(`package toyint

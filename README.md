@@ -7,6 +7,8 @@
 
 ### Try it on a service (minimal)
 
+`goa-vcr` currently targets Goa `v3.23.x`; `v3.25+` compatibility is deferred.
+
 The Goa plugin model is: your plugin must be linked into the generator binary that runs during `goa gen` ([plugin guide](https://pkg.go.dev/goa.design/plugins/v3)).
 
 1. Add a blank import in your design module (any file in the design package):
