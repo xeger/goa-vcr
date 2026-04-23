@@ -41,6 +41,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -58,7 +59,7 @@ import (
 
 func TestPlayback_PolicyWithAuthorizationClaimsIsIgnored(t *testing.T) {
 	stubRoot := t.TempDir()
-	policyJSON := "{\"upstream\":\"https://example.com\",\"authorization\":{\"claims\":{\"sub\":\"deadbeef\"}}}"
+	policyJSON := "{\"upstream\":\"https://example.com\",\"authorization\":{\"claims\":{\"sub\":\"deadbeef\"}},\"endpoints\":{\"GetThing\":{\"variant\":{\"path\":false}}}}"
 	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte(policyJSON), 0600); err != nil {
 		t.Fatalf("write policy: %%v", err)
 	}
@@ -135,7 +136,7 @@ func TestPlayback_EmptyScenarioDelegatesToBackground(t *testing.T) {
 
 func TestPlayback_ScenarioOverridesUnary(t *testing.T) {
 	stubRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte("{\"upstream\":\"https://example.com\"}\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte("{\"upstream\":\"https://example.com\",\"endpoints\":{\"GetThing\":{\"variant\":{\"path\":false}}}}\n"), 0600); err != nil {
 		t.Fatalf("write policy: %%v", err)
 	}
 	store, err := vcrruntime.New(stubRoot)
@@ -168,7 +169,7 @@ func TestPlayback_ScenarioOverridesUnary(t *testing.T) {
 
 func TestPlayback_ScenarioPostProcessesBackground(t *testing.T) {
 	stubRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte("{\"upstream\":\"https://example.com\"}\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte("{\"upstream\":\"https://example.com\",\"endpoints\":{\"GetThing\":{\"variant\":{\"path\":false}}}}\n"), 0600); err != nil {
 		t.Fatalf("write policy: %%v", err)
 	}
 	store, err := vcrruntime.New(stubRoot)
@@ -215,7 +216,7 @@ func TestPlayback_ScenarioPostProcessesBackground(t *testing.T) {
 
 func TestPlayback_StackLayersOuterFirst(t *testing.T) {
 	stubRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte("{\"upstream\":\"https://example.com\"}\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte("{\"upstream\":\"https://example.com\",\"endpoints\":{\"GetThing\":{\"variant\":{\"path\":false}}}}\n"), 0600); err != nil {
 		t.Fatalf("write policy: %%v", err)
 	}
 	store, err := vcrruntime.New(stubRoot)
@@ -454,6 +455,158 @@ func TestPlayback_WebSocketBidirectionalAndSendOnly(t *testing.T) {
 	}
 }
 
+func TestPlayback_DynamicScenarioStackEndpoints(t *testing.T) {
+	stubRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte("{\"upstream\":\"https://example.com\"}\n"), 0600); err != nil {
+		t.Fatalf("write policy: %%v", err)
+	}
+	store, err := vcrruntime.New(stubRoot)
+	if err != nil {
+		t.Fatalf("new store: %%v", err)
+	}
+
+	body := []byte("{\"id\":\"123\"}\n")
+	div := vcrruntime.PathDiversifier(url.Values{"id": []string{"123"}})
+	if err := store.WriteStub("GetThing", vcrruntime.RequestSpec{URL: "http://example.com/things/123"}, vcrruntime.ResponseMeta{
+		Status:   200,
+		MimeType: "application/json",
+		Size:     len(body),
+	}, body, div); err != nil {
+		t.Fatalf("write stub: %%v", err)
+	}
+
+	happy := func(next toy.Service) toy.Service {
+		s := toyvcr.NewScenario(next)
+		s.SetGetThing(func(ctx context.Context, p *toy.GetThingPayload, next toy.Service) (*toy.Thing, error) {
+			r, err := next.GetThing(ctx, p)
+			if err != nil {
+				return nil, err
+			}
+			r.ID = "happy-" + r.ID
+			return r, nil
+		})
+		return s
+	}
+	sad := func(next toy.Service) toy.Service {
+		s := toyvcr.NewScenario(next)
+		s.SetGetThing(func(ctx context.Context, p *toy.GetThingPayload, next toy.Service) (*toy.Thing, error) {
+			r, err := next.GetThing(ctx, p)
+			if err != nil {
+				return nil, err
+			}
+			r.ID = "sad-" + r.ID
+			return r, nil
+		})
+		return s
+	}
+	registry := map[string]func(toy.Service) toy.Service{
+		"Happy": happy,
+		"Sad":   sad,
+		"Noop": func(next toy.Service) toy.Service {
+			return next
+		},
+		"Broken": func(next toy.Service) toy.Service {
+			return next
+		},
+	}
+
+	buildPlayback := func(specs []vcrruntime.ScenarioSpec) (http.Handler, error) {
+		bg := toyvcr.NewBackground(store)
+		layers := make([]func(toy.Service) toy.Service, len(specs))
+		for i := range specs {
+			if specs[i].Name == "Broken" {
+				return nil, fmt.Errorf("broken scenario build")
+			}
+			layer, ok := registry[specs[i].Name]
+			if !ok {
+				return nil, fmt.Errorf("unknown scenario %%q", specs[i].Name)
+			}
+			layers[i] = layer
+		}
+		svc := toyvcr.Stack(bg, layers...)
+		return toyvcr.NewPlaybackHandler(svc)
+	}
+	ctrl, err := vcrruntime.NewActiveScenarios(
+		[]string{"Happy", "Sad", "Noop", "Broken"},
+		[]vcrruntime.ScenarioSpec{{Name: "Happy"}, {Name: "Sad"}},
+		buildPlayback,
+	)
+	if err != nil {
+		t.Fatalf("new active scenarios: %%v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/", ctrl)
+	mux.HandleFunc("/__vcr__/scenarios", ctrl.HandleScenarios)
+	mux.HandleFunc("/__vcr__/scenarios/active", ctrl.HandleActiveScenarios)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	expectThingID := func(want string) {
+		t.Helper()
+		res := mustGet(t, srv.URL+"/things/123", nil)
+		if res.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(res.Body)
+			_ = res.Body.Close()
+			t.Fatalf("unexpected status: %%d body=%%q", res.StatusCode, string(b))
+		}
+		got := decodeThing(t, res.Body)
+		if got.ID != want {
+			t.Fatalf("expected id %%q, got %%q", want, got.ID)
+		}
+	}
+	expectThingID("happy-sad-123")
+
+	res := mustGet(t, srv.URL+"/__vcr__/scenarios", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: %%d", res.StatusCode)
+	}
+	var state struct {
+		Active []vcrruntime.ScenarioSpec
+	}
+	if err := json.NewDecoder(res.Body).Decode(&state); err != nil {
+		t.Fatalf("decode scenarios: %%v", err)
+	}
+	_ = res.Body.Close()
+	if len(state.Active) != 2 || state.Active[0].Name != "Happy" || state.Active[1].Name != "Sad" {
+		t.Fatalf("unexpected active stack: %%+v", state.Active)
+	}
+
+	putRes := mustJSONRequest(t, http.MethodPut, srv.URL+"/__vcr__/scenarios/active", "[{\"name\":\"Sad\"},{\"name\":\"Happy\"}]")
+	if putRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: %%d", putRes.StatusCode)
+	}
+	_ = putRes.Body.Close()
+	expectThingID("sad-happy-123")
+
+	putBgRes := mustJSONRequest(t, http.MethodPut, srv.URL+"/__vcr__/scenarios/active", "[]")
+	if putBgRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: %%d", putBgRes.StatusCode)
+	}
+	_ = putBgRes.Body.Close()
+	expectThingID("123")
+
+	putFailRes := mustJSONRequest(t, http.MethodPut, srv.URL+"/__vcr__/scenarios/active", "[{\"name\":\"Broken\"}]")
+	if putFailRes.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unexpected status: %%d", putFailRes.StatusCode)
+	}
+	_ = putFailRes.Body.Close()
+	expectThingID("123")
+
+	delReq, err := http.NewRequest(http.MethodDelete, srv.URL+"/__vcr__/scenarios/active", nil)
+	if err != nil {
+		t.Fatalf("new request: %%v", err)
+	}
+	delRes, err := http.DefaultClient.Do(delReq)
+	if err != nil {
+		t.Fatalf("delete request: %%v", err)
+	}
+	if delRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status: %%d", delRes.StatusCode)
+	}
+	_ = delRes.Body.Close()
+	expectThingID("happy-sad-123")
+}
+
 func mustGet(t *testing.T, url string, hdr http.Header) *http.Response {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodGet, url, nil)
@@ -465,6 +618,20 @@ func mustGet(t *testing.T, url string, hdr http.Header) *http.Response {
 			req.Header.Add(k, v)
 		}
 	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %%v", err)
+	}
+	return res
+}
+
+func mustJSONRequest(t *testing.T, method, url, body string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(method, url, bytes.NewBufferString(body))
+	if err != nil {
+		t.Fatalf("new request: %%v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("do: %%v", err)
@@ -519,20 +686,19 @@ import (
 
 	toy "%[1]s/gen/toy"
 	toyvcr "%[1]s/gen/http/toy/vcr"
-	vcrruntime "github.com/xeger/goa-vcr/runtime"
 )
 
 func TestVCRCLI_Usage(t *testing.T) {
 	code := toyvcr.RunCLI([]string{"help"}, toyvcr.CLIConfig{
 		AppName: "toy-vcr",
-		ScenarioRegistry: map[string]func(*vcrruntime.VCR) toy.Service{
-			"Noop": func(store *vcrruntime.VCR) toy.Service {
-				return toyvcr.NewBackground(store)
+		ScenarioRegistry: map[string]func(toy.Service) toy.Service{
+			"Noop": func(next toy.Service) toy.Service {
+				return next
 			},
 		},
-		DefaultPort:     8080,
-		DefaultUpstream: "https://example.com",
-		DefaultScenario: "Noop",
+		DefaultPort:      8080,
+		DefaultUpstream:  "https://example.com",
+		DefaultScenarios: []string{"Noop"},
 	})
 	if code != 0 {
 		t.Fatalf("expected exit code 0, got %%d", code)

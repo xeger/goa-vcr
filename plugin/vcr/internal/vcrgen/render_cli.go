@@ -23,6 +23,7 @@ func RenderServiceVCRCLI(spec ServiceSpec) *codegen.File {
 		codegen.SimpleImport("os"),
 		codegen.SimpleImport("os/signal"),
 		codegen.SimpleImport("path/filepath"),
+		codegen.SimpleImport("sort"),
 		codegen.SimpleImport("strings"),
 		codegen.SimpleImport("syscall"),
 		codegen.SimpleImport("time"),
@@ -58,10 +59,11 @@ var globalDebug bool
 // CLIConfig controls the generated CLI behavior and defaults.
 type CLIConfig struct {
 	AppName          string
-	ScenarioRegistry map[string]func(*vcrruntime.VCR) {{ .ServicePkgName }}.Service
+	ScenarioRegistry map[string]func({{ .ServicePkgName }}.Service) {{ .ServicePkgName }}.Service
 	DefaultPort      int
 	DefaultUpstream  string
 	DefaultScenario  string
+	DefaultScenarios []string
 }
 
 // Usage returns a full CLI usage string.
@@ -128,13 +130,46 @@ func normalizeCLIConfig(cfg CLIConfig) CLIConfig {
 	if cfg.DefaultPort == 0 {
 		cfg.DefaultPort = 8084
 	}
+	if len(cfg.DefaultScenarios) == 0 && cfg.DefaultScenario != "" {
+		cfg.DefaultScenarios = []string{cfg.DefaultScenario}
+	}
+	if len(cfg.DefaultScenarios) == 0 {
+		cfg.DefaultScenarios = []string{"Noop"}
+	}
 	if cfg.DefaultScenario == "" {
-		cfg.DefaultScenario = "Noop"
+		cfg.DefaultScenario = cfg.DefaultScenarios[0]
 	}
 	if cfg.ScenarioRegistry == nil {
-		cfg.ScenarioRegistry = map[string]func(*vcrruntime.VCR) {{ .ServicePkgName }}.Service{}
+		cfg.ScenarioRegistry = map[string]func({{ .ServicePkgName }}.Service) {{ .ServicePkgName }}.Service{}
 	}
 	return cfg
+}
+
+type scenarioListFlag []string
+
+func (f *scenarioListFlag) String() string {
+	return strings.Join(*f, ",")
+}
+
+func (f *scenarioListFlag) Set(value string) error {
+	*f = append(*f, value)
+	return nil
+}
+
+func scenarioSpecs(names []string) []vcrruntime.ScenarioSpec {
+	specs := make([]vcrruntime.ScenarioSpec, len(names))
+	for i := range names {
+		specs[i] = vcrruntime.ScenarioSpec{Name: names[i]}
+	}
+	return specs
+}
+
+func scenarioNames(specs []vcrruntime.ScenarioSpec) []string {
+	names := make([]string, len(specs))
+	for i := range specs {
+		names[i] = specs[i].Name
+	}
+	return names
 }
 
 func cmdContext(cmd string) context.Context {
@@ -420,7 +455,8 @@ func cmdPlay(args []string, cfg CLIConfig) int {
 	fs := flag.NewFlagSet("play", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	portFlag := fs.Int("port", cfg.DefaultPort, "Port to listen on")
-	scenarioFlag := fs.String("scenario", cfg.DefaultScenario, "Scenario name (streaming + background-override endpoints)")
+	scenarioFlag := scenarioListFlag{}
+	fs.Var(&scenarioFlag, "scenario", "Scenario name (repeat for outer-to-inner stack)")
 
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr,
@@ -435,7 +471,8 @@ func cmdPlay(args []string, cfg CLIConfig) int {
 		fs.PrintDefaults()
 		fmt.Fprintf(os.Stderr,
 			"Examples:\n"+
-				"  %[1]s play ./testdata\n",
+				"  %[1]s play ./testdata\n"+
+				"  %[1]s play -scenario Happy -scenario Sad ./testdata\n",
 			cfg.AppName,
 		)
 	}
@@ -467,24 +504,48 @@ func cmdPlay(args []string, cfg CLIConfig) int {
 	}
 
 	addr := fmt.Sprintf("127.0.0.1:%d", *portFlag)
-
-	build, ok := cfg.ScenarioRegistry[*scenarioFlag]
-	if !ok {
-		log.Errorf(ctx, fmt.Errorf("unknown scenario %q", *scenarioFlag), "invalid scenario")
-		return 1
+	activeNames := []string(scenarioFlag)
+	if len(activeNames) == 0 {
+		activeNames = append(activeNames, cfg.DefaultScenarios...)
 	}
+	defaultSpecs := scenarioSpecs(activeNames)
 
-	svc := build(store)
+	registered := make([]string, 0, len(cfg.ScenarioRegistry))
+	for name := range cfg.ScenarioRegistry {
+		registered = append(registered, name)
+	}
+	sort.Strings(registered)
 
-	h, err := NewPlaybackHandler(svc)
+	buildPlayback := func(specs []vcrruntime.ScenarioSpec) (http.Handler, error) {
+		bg := NewBackground(store)
+		layers := make([]func({{ .ServicePkgName }}.Service) {{ .ServicePkgName }}.Service, len(specs))
+		for i := range specs {
+			layer, ok := cfg.ScenarioRegistry[specs[i].Name]
+			if !ok {
+				return nil, fmt.Errorf("unknown scenario %q", specs[i].Name)
+			}
+			layers[i] = layer
+		}
+		svc := Stack(bg, layers...)
+		h, err := NewPlaybackHandler(svc)
+		if err != nil {
+			return nil, err
+		}
+		return vcrAccessLog(store)(h), nil
+	}
+	controller, err := vcrruntime.NewActiveScenarios(registered, defaultSpecs, buildPlayback)
 	if err != nil {
 		log.Errorf(ctx, err, "failed to build playback handler")
 		return 1
 	}
-	// Order matters: install a clue/log logger in the request context first,
-	// then run the debug access log middleware.
-	h = vcrAccessLog(store)(h)
-	h = withRequestLogContext(h)
+
+	mux := http.NewServeMux()
+	mux.Handle("/", controller)
+	mux.HandleFunc("/__vcr__/scenarios", controller.HandleScenarios)
+	mux.HandleFunc("/__vcr__/scenarios/active", controller.HandleActiveScenarios)
+
+	// Order matters: install a clue/log logger in the request context first.
+	h := withRequestLogContext(mux)
 
 	httpServer := &http.Server{
 		Addr:              addr,
@@ -504,7 +565,7 @@ func cmdPlay(args []string, cfg CLIConfig) int {
 		_ = httpServer.Close()
 	}()
 
-	log.Print(ctx, log.KV{K: "http-addr", V: addr}, log.KV{K: "vcr.scenario", V: *scenarioFlag})
+	log.Print(ctx, log.KV{K: "http-addr", V: addr}, log.KV{K: "vcr.scenarios", V: strings.Join(scenarioNames(defaultSpecs), ",")})
 
 	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Errorf(ctx, err, "server error")
