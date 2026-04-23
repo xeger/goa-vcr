@@ -43,6 +43,18 @@ func TestRenderServiceVCRCLI_WritesCLIFile(t *testing.T) {
 	assertContains(t, src, "func RunCLI(")
 	assertContains(t, src, "func Usage(")
 	assertContains(t, src, "Endpoints()")
-	assertContains(t, src, "BuildScenario(")
-	assertContains(t, src, "NewPlaybackHandler(")
+
+	// New: registry builds a Service from a store.
+	assertContains(t, src, "ScenarioRegistry")
+	assertContains(t, src, "map[string]func(*vcrruntime.VCR) toy.Service")
+	assertContains(t, src, "NewPlaybackHandler(svc)")
+	assertContains(t, src, "svc := build(store)")
+
+	// Removed: loopback plumbing.
+	assertNotContains(t, src, "BuildScenario(")
+	assertNotContains(t, src, "loopbackDoer")
+	assertNotContains(t, src, "LoopbackHeader")
+	assertNotContains(t, src, "IsLoopback")
+	assertNotContains(t, src, "PlaybackOptions")
+	assertNotContains(t, src, "ScenarioFactory")
 }

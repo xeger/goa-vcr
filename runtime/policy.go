@@ -123,4 +123,3 @@ func (v *VCR) WritePolicy() error {
 	}
 	return nil
 }
-

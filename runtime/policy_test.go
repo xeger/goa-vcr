@@ -31,4 +31,3 @@ func TestPolicySetAndClearVariantQuery(t *testing.T) {
 		t.Fatalf("unexpected after clear: enabled=%v explicit=%v", enabled, explicit)
 	}
 }
-

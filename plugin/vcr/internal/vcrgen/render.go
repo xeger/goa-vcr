@@ -15,11 +15,9 @@ func RenderServiceVCR(spec ServiceSpec) *codegen.File {
 		codegen.SimpleImport("errors"),
 		codegen.SimpleImport("fmt"),
 		codegen.SimpleImport("net/http"),
-		codegen.SimpleImport("net/url"),
 
 		codegen.NewImport("vcrruntime", "github.com/xeger/goa-vcr/runtime"),
 		codegen.NewImport("goahttp", "goa.design/goa/v3/http"),
-		codegen.NewImport("goa", "goa.design/goa/v3/pkg"),
 		codegen.NewImport(spec.ServicePkgName, filepath.ToSlash(filepath.Join(spec.GenPkg, spec.ServicePathName))),
 		codegen.NewImport("httpclient", filepath.ToSlash(filepath.Join(spec.GenPkg, "http", spec.ServicePathName, "client"))),
 		codegen.NewImport("httpserver", filepath.ToSlash(filepath.Join(spec.GenPkg, "http", spec.ServicePathName, "server"))),
@@ -76,76 +74,29 @@ func Endpoints() []vcrruntime.Endpoint {
 	return endpoints
 }
 
-// Scenario is a typed wrapper around vcrruntime.Scenario.
+// Scenario implements {{ .ServicePkgName }}.Service by maintaining a
+// clue/mock-backed handler queue per method and delegating to an underlying
+// "next" Service when no handler is set. Scenarios compose by wrapping other
+// Services, enabling middleware-style stacking over the stub-backed background.
 type Scenario struct {
-	vcrruntime.Scenario
+	queue vcrruntime.Scenario
+	next  {{ .ServicePkgName }}.Service
 }
 
-// NewScenario returns a new scenario queue.
-func NewScenario() Scenario {
-	return Scenario{Scenario: vcrruntime.NewScenario()}
+// NewScenario returns a new Scenario layered on next.
+func NewScenario(next {{ .ServicePkgName }}.Service) *Scenario {
+	return &Scenario{queue: vcrruntime.NewScenario(), next: next}
 }
 
-// ScenarioFactory creates a Scenario from a loopback-generated Goa HTTP client.
-// Implementations can close over the client to fetch unary data.
-type ScenarioFactory func(client *httpclient.Client) Scenario
-
-type loopbackDoer struct {
-	base goahttp.Doer
-}
-
-func (d loopbackDoer) Do(req *http.Request) (*http.Response, error) {
-	if req != nil {
-		req.Header.Set(vcrruntime.LoopbackHeader, "1")
+// Stack applies layers to bg with the first layer outermost and the last
+// layer innermost. Stack(bg, outer, middle, inner) produces
+// outer(middle(inner(bg))).
+func Stack(bg {{ .ServicePkgName }}.Service, layers ...func({{ .ServicePkgName }}.Service) {{ .ServicePkgName }}.Service) {{ .ServicePkgName }}.Service {
+	result := bg
+	for i := len(layers) - 1; i >= 0; i-- {
+		result = layers[i](result)
 	}
-	return d.base.Do(req)
-}
-
-// NewLoopbackClient constructs a service HTTP client pointing at baseURL.
-// The returned client always sets vcrruntime.LoopbackHeader on requests.
-func NewLoopbackClient(baseURL string, doer goahttp.Doer) (*httpclient.Client, error) {
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		return nil, err
-	}
-	if u.Scheme == "" || u.Host == "" {
-		return nil, fmt.Errorf("invalid base URL %q", baseURL)
-	}
-	if doer == nil {
-		doer = http.DefaultClient
-	}
-	doer = loopbackDoer{base: doer}
-	{{- if .HasWebSocket }}
-	return httpclient.NewClient(
-		u.Scheme,
-		u.Host,
-		doer,
-		goahttp.RequestEncoder,
-		goahttp.ResponseDecoder,
-		false,
-		nil,
-		nil,
-	), nil
-	{{- else }}
-	return httpclient.NewClient(
-		u.Scheme,
-		u.Host,
-		doer,
-		goahttp.RequestEncoder,
-		goahttp.ResponseDecoder,
-		false,
-	), nil
-	{{- end }}
-}
-
-// BuildScenario constructs a loopback HTTP client (whose requests bypass unary
-// scenario handling completely) and applies the factory.
-func BuildScenario(baseURL string, doer goahttp.Doer, factory ScenarioFactory) (Scenario, *httpclient.Client, error) {
-	client, err := NewLoopbackClient(baseURL, doer)
-	if err != nil {
-		return Scenario{}, nil, err
-	}
-	return factory(client), client, nil
+	return result
 }
 
 {{- if .HasViewedResult }}
@@ -175,10 +126,16 @@ func viewFromPayload(p any) string {
 }
 {{- end }}
 
-// NewBackgroundClient returns a protocol-agnostic service client backed by
-// stub responses. The returned client decodes stubbed HTTP responses into
-// concrete Goa result types.
-func NewBackgroundClient(store *vcrruntime.VCR) *{{ .ServicePkgName }}.Client {
+// backgroundService implements {{ .ServicePkgName }}.Service using a
+// stub-backed Goa HTTP client for unary methods. Streaming methods return an
+// explicit error — no recorded-stream background exists.
+type backgroundService struct {
+	hc *{{ .ServicePkgName }}.Client
+}
+
+// NewBackground returns a {{ .ServicePkgName }}.Service backed by recorded
+// stubs in store.
+func NewBackground(store *vcrruntime.VCR) {{ .ServicePkgName }}.Service {
 	doer := vcrruntime.NewStubDoer(store, Endpoints())
 	// The scheme/host are irrelevant as StubDoer matches on verb+path.
 	scheme := "http"
@@ -188,32 +145,22 @@ func NewBackgroundClient(store *vcrruntime.VCR) *{{ .ServicePkgName }}.Client {
 	{{- else }}
 	hc := httpclient.NewClient(scheme, host, doer, goahttp.RequestEncoder, goahttp.ResponseDecoder, false)
 	{{- end }}
-	return &{{ .ServicePkgName }}.Client{
+	return &backgroundService{hc: &{{ .ServicePkgName }}.Client{
 		{{- range .Endpoints }}
 		{{ .MethodVarName }}Endpoint: hc.{{ .MethodVarName }}(),
 		{{- end }}
-	}
+	}}
 }
 
-// PlaybackOptions configures playback handler generation.
-type PlaybackOptions struct {
-	ScenarioName string
-}
-
-// NewPlaybackHandler returns a handler that serves stub-backed responses using
-// Goa-generated HTTP server code, dispatching to scenario handlers when present.
-func NewPlaybackHandler(store *vcrruntime.VCR, scenario Scenario, opts PlaybackOptions) (http.Handler, error) {
-	if store == nil {
-		return nil, errors.New("vcr: nil store")
+// NewPlaybackHandler wraps any {{ .ServicePkgName }}.Service as an HTTP
+// handler using the Goa-generated HTTP server for the service.
+func NewPlaybackHandler(svc {{ .ServicePkgName }}.Service) (http.Handler, error) {
+	if svc == nil {
+		return nil, errors.New("vcr: nil service")
 	}
-	bg := NewBackgroundClient(store)
 	mux := goahttp.NewMuxer()
 
-	eps := &{{ .ServicePkgName }}.Endpoints{
-		{{- range .Endpoints }}
-		{{ .MethodVarName }}: makeEndpoint{{ .MethodVarName }}(store, scenario, bg, opts),
-		{{- end }}
-	}
+	eps := {{ .ServicePkgName }}.NewEndpoints(svc)
 
 	errHandler := func(ctx context.Context, w http.ResponseWriter, err error) {
 		// Keep this minimal: callers may install their own goa error formatter higher up.
@@ -234,151 +181,112 @@ func NewPlaybackHandler(store *vcrruntime.VCR, scenario Scenario, opts PlaybackO
 	{{- end }}
 	server.Mount(mux)
 
-	// Mark loopback requests so endpoint dispatch can avoid scenario recursion.
-	return vcrruntime.LoopbackMiddleware(mux), nil
+	return mux, nil
 }
 
-{{ range .Endpoints }}
+{{- range .Endpoints }}
 
 // Service{{ .MethodVarName }}Func is the typed scenario handler signature for {{ .MethodVarName }}.
 {{- if .IsStreaming }}
 type Service{{ .MethodVarName }}Func func(context.Context, {{ .PayloadRef }}, {{ $.ServicePkgName }}.{{ .MethodVarName }}ServerStream) error
-{{- else if .SkipResponseBodyEncodeDecode }}
-type Service{{ .MethodVarName }}Func goa.Endpoint
 {{- else if .ResultRef }}
-type Service{{ .MethodVarName }}Func func(context.Context, {{ .PayloadRef }}) ({{ .ResultRef }}, error)
+type Service{{ .MethodVarName }}Func func(context.Context, {{ .PayloadRef }}, {{ $.ServicePkgName }}.Service) ({{ .ResultRef }}, error)
 {{- else }}
-type Service{{ .MethodVarName }}Func func(context.Context, {{ .PayloadRef }}) error
+type Service{{ .MethodVarName }}Func func(context.Context, {{ .PayloadRef }}, {{ $.ServicePkgName }}.Service) error
 {{- end }}
 
 func (s *Scenario) Set{{ .MethodVarName }}(f Service{{ .MethodVarName }}Func) {
-	s.Set("{{ .MethodVarName }}", f)
+	s.queue.Set("{{ .MethodVarName }}", f)
 }
 
 func (s *Scenario) Add{{ .MethodVarName }}(f Service{{ .MethodVarName }}Func) {
-	s.Add("{{ .MethodVarName }}", f)
+	s.queue.Add("{{ .MethodVarName }}", f)
 }
 
 {{ if .IsStreaming }}
-func makeEndpoint{{ .MethodVarName }}(_ *vcrruntime.VCR, scenario Scenario, _ *{{ $.ServicePkgName }}.Client, _ PlaybackOptions) goa.Endpoint {
-	return func(ctx context.Context, v any) (any, error) {
-		in, ok := v.(*{{ $.ServicePkgName }}.{{ .MethodVarName }}EndpointInput)
-		if !ok || in == nil {
-			return nil, fmt.Errorf("vcr: unexpected {{ .MethodVarName }} input %T", v)
-		}
-		handler := scenario.Next("{{ .MethodVarName }}")
-		if handler == nil {
-			return nil, fmt.Errorf("vcr: no scenario handler for {{ .MethodVarName }}")
-		}
-		f, ok := handler.(Service{{ .MethodVarName }}Func)
+// {{ .MethodVarName }} dispatches to the handler queue (if any) or delegates
+// to the underlying Service. Stream handlers are terminal — they do not
+// receive a next argument.
+func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}, stream {{ $.ServicePkgName }}.{{ .MethodVarName }}ServerStream) error {
+	if h := s.queue.Next("{{ .MethodVarName }}"); h != nil {
+		fn, ok := h.(Service{{ .MethodVarName }}Func)
 		if !ok {
-			return nil, fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", handler)
+			return fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", h)
 		}
-		return nil, f(ctx, in.Payload, in.Stream)
+		return fn(ctx, p, stream)
 	}
+	return s.next.{{ .MethodVarName }}(ctx, p, stream)
 }
-{{ else if .SkipResponseBodyEncodeDecode }}
-// {{ .MethodVarName }} uses SkipResponseBodyEncodeDecode; call the raw endpoint
-// to preserve the ResponseData wrapper expected by the Goa HTTP server.
-func makeEndpoint{{ .MethodVarName }}(_ *vcrruntime.VCR, scenario Scenario, bg *{{ $.ServicePkgName }}.Client, _ PlaybackOptions) goa.Endpoint {
-	return func(ctx context.Context, v any) (any, error) {
-		if vcrruntime.IsLoopback(ctx) {
-			return bg.{{ .MethodVarName }}Endpoint(ctx, v)
-		}
-		handler := scenario.Next("{{ .MethodVarName }}")
-		if handler != nil {
-			f, ok := handler.(Service{{ .MethodVarName }}Func)
-			if !ok {
-				return nil, fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", handler)
-			}
-			return f(ctx, v)
-		}
-		return bg.{{ .MethodVarName }}Endpoint(ctx, v)
-	}
+
+func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}, stream {{ $.ServicePkgName }}.{{ .MethodVarName }}ServerStream) error {
+	return fmt.Errorf("vcr: no scenario handler for {{ .MethodVarName }} and no recorded-stream background is available")
 }
 {{ else if and .ResultRef .ViewedResultInitName }}
-func makeEndpoint{{ .MethodVarName }}(_ *vcrruntime.VCR, scenario Scenario, bg *{{ $.ServicePkgName }}.Client, _ PlaybackOptions) goa.Endpoint {
-	return func(ctx context.Context, v any) (any, error) {
-		p, ok := v.({{ .PayloadRef }})
+// {{ .MethodVarName }} dispatches to the handler queue (if any) or delegates.
+// Handlers return the plain result type and the selected view name; the Goa
+// endpoint layer (NewEndpoints) is responsible for wrapping to the viewed type.
+func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, string, error) {
+	if h := s.queue.Next("{{ .MethodVarName }}"); h != nil {
+		fn, ok := h.(Service{{ .MethodVarName }}Func)
 		if !ok {
-			return nil, fmt.Errorf("vcr: unexpected {{ .MethodVarName }} payload %T", v)
+			return nil, "", fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", h)
 		}
-
-		var (
-			res {{ .ResultRef }}
-			err error
-		)
-
-		if vcrruntime.IsLoopback(ctx) {
-			res, err = bg.{{ .MethodVarName }}(ctx, p)
-		} else {
-			handler := scenario.Next("{{ .MethodVarName }}")
-			if handler != nil {
-				f, ok := handler.(Service{{ .MethodVarName }}Func)
-				if !ok {
-					return nil, fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", handler)
-				}
-				res, err = f(ctx, p)
-			} else {
-				res, err = bg.{{ .MethodVarName }}(ctx, p)
-			}
-		}
+		res, err := fn(ctx, p, s.next)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
-
 		{{- if .ViewedResultViewName }}
-		return {{ $.ServicePkgName }}.{{ .ViewedResultInitName }}(res, {{ printf "%q" .ViewedResultViewName }}), nil
+		return res, {{ printf "%q" .ViewedResultViewName }}, nil
 		{{- else }}
-		return {{ $.ServicePkgName }}.{{ .ViewedResultInitName }}(res, viewFromPayload(p)), nil
+		return res, viewFromPayload(p), nil
 		{{- end }}
 	}
+	return s.next.{{ .MethodVarName }}(ctx, p)
+}
+
+func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, string, error) {
+	res, err := b.hc.{{ .MethodVarName }}(ctx, p)
+	if err != nil {
+		return nil, "", err
+	}
+	{{- if .ViewedResultViewName }}
+	return res, {{ printf "%q" .ViewedResultViewName }}, nil
+	{{- else }}
+	return res, viewFromPayload(p), nil
+	{{- end }}
 }
 {{ else if .ResultRef }}
-func makeEndpoint{{ .MethodVarName }}(_ *vcrruntime.VCR, scenario Scenario, bg *{{ $.ServicePkgName }}.Client, _ PlaybackOptions) goa.Endpoint {
-	return func(ctx context.Context, v any) (any, error) {
-		p, ok := v.({{ .PayloadRef }})
+func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, error) {
+	if h := s.queue.Next("{{ .MethodVarName }}"); h != nil {
+		fn, ok := h.(Service{{ .MethodVarName }}Func)
 		if !ok {
-			return nil, fmt.Errorf("vcr: unexpected {{ .MethodVarName }} payload %T", v)
+			return nil, fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", h)
 		}
-		if vcrruntime.IsLoopback(ctx) {
-			return bg.{{ .MethodVarName }}(ctx, p)
-		}
-		handler := scenario.Next("{{ .MethodVarName }}")
-		if handler != nil {
-			f, ok := handler.(Service{{ .MethodVarName }}Func)
-			if !ok {
-				return nil, fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", handler)
-			}
-			return f(ctx, p)
-		}
-		return bg.{{ .MethodVarName }}(ctx, p)
+		return fn(ctx, p, s.next)
 	}
+	return s.next.{{ .MethodVarName }}(ctx, p)
+}
+
+func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, error) {
+	return b.hc.{{ .MethodVarName }}(ctx, p)
 }
 {{ else }}
-func makeEndpoint{{ .MethodVarName }}(_ *vcrruntime.VCR, scenario Scenario, bg *{{ $.ServicePkgName }}.Client, _ PlaybackOptions) goa.Endpoint {
-	return func(ctx context.Context, v any) (any, error) {
-		p, ok := v.({{ .PayloadRef }})
+func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) error {
+	if h := s.queue.Next("{{ .MethodVarName }}"); h != nil {
+		fn, ok := h.(Service{{ .MethodVarName }}Func)
 		if !ok {
-			return nil, fmt.Errorf("vcr: unexpected {{ .MethodVarName }} payload %T", v)
+			return fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", h)
 		}
-		if vcrruntime.IsLoopback(ctx) {
-			return nil, bg.{{ .MethodVarName }}(ctx, p)
-		}
-		handler := scenario.Next("{{ .MethodVarName }}")
-		if handler != nil {
-			f, ok := handler.(Service{{ .MethodVarName }}Func)
-			if !ok {
-				return nil, fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", handler)
-			}
-			return nil, f(ctx, p)
-		}
-		return nil, bg.{{ .MethodVarName }}(ctx, p)
+		return fn(ctx, p, s.next)
 	}
+	return s.next.{{ .MethodVarName }}(ctx, p)
+}
+
+func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) error {
+	return b.hc.{{ .MethodVarName }}(ctx, p)
 }
 {{ end }}
-
-{{ end }}
+{{- end }}
 `
 
 func routesCount(endpoints []EndpointSpec) int {

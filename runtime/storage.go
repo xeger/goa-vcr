@@ -117,4 +117,3 @@ func stubKey(endpointName, diversifier string) string {
 	}
 	return strings.Join([]string{endpointName, diversifier}, "--")
 }
-

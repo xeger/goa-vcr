@@ -88,4 +88,3 @@ func hash64Hex(value string) string {
 	_, _ = h.Write([]byte(value))
 	return fmt.Sprintf("%016x", h.Sum64())
 }
-

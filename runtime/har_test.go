@@ -36,4 +36,3 @@ func TestReadHARBlob(t *testing.T) {
 		t.Fatalf("unexpected result: %q", result.Foo)
 	}
 }
-

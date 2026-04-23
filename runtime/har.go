@@ -189,4 +189,3 @@ func httpStatusText(code int) string {
 	}
 	return http.StatusText(code)
 }
-

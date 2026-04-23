@@ -39,4 +39,3 @@ func (s *Scenario) Set(name string, handler any) {
 func (s *Scenario) Add(name string, handler any) {
 	s.ensureMock().Add(name, handler)
 }
-

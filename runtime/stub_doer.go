@@ -81,4 +81,3 @@ func vcrErrorResponse(req *http.Request, status int, msg string) *http.Response 
 		Request:       req,
 	}
 }
-
