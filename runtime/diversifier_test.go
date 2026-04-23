@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -23,12 +24,12 @@ func TestRequestDiversifierRespectsPolicyDefaults(t *testing.T) {
 	q := url.Values{}
 	q.Add("x", "1")
 
-	// Default: query enabled, path disabled.
+	// Default: query and path enabled — path part first, then query.
 	div := RequestDiversifier(policy, "AnyEndpoint", q, map[string]string{"id": "123"})
 	if div == "" {
-		t.Fatalf("expected non-empty diversifier (query default enabled)")
+		t.Fatalf("expected non-empty diversifier")
 	}
-	if len(div) < 2 || div[0:2] != "q-" {
-		t.Fatalf("expected query diversifier prefix, got %q", div)
+	if !strings.HasPrefix(div, "p-") || !strings.Contains(div, "--q-") {
+		t.Fatalf("expected path then query diversifier, got %q", div)
 	}
 }

@@ -96,7 +96,7 @@ func TestPlayback_PolicyWithAuthorizationClaimsIsIgnored(t *testing.T) {
 
 func TestPlayback_EmptyScenarioDelegatesToBackground(t *testing.T) {
 	stubRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte("{\"upstream\":\"https://example.com\"}\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte("{\"upstream\":\"https://example.com\",\"endpoints\":{\"GetThing\":{\"variant\":{\"path\":false}}}}\n"), 0600); err != nil {
 		t.Fatalf("write policy: %%v", err)
 	}
 	store, err := vcrruntime.New(stubRoot)
@@ -280,7 +280,7 @@ func TestPlayback_StackLayersOuterFirst(t *testing.T) {
 
 func TestPlayback_UnaryViewedResult_NoPanicAndRespectsView(t *testing.T) {
 	stubRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte("{\"upstream\":\"https://example.com\",\"endpoints\":{\"GetThingViewed\":{\"variant\":{\"query\":false}}}}\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte("{\"upstream\":\"https://example.com\",\"endpoints\":{\"GetThingViewed\":{\"variant\":{\"query\":false,\"path\":false}}}}\n"), 0600); err != nil {
 		t.Fatalf("write policy: %%v", err)
 	}
 	store, err := vcrruntime.New(stubRoot)
@@ -530,10 +530,9 @@ func TestVCRCLI_Usage(t *testing.T) {
 				return toyvcr.NewBackground(store)
 			},
 		},
-		DefaultPort:        8080,
-		DefaultUpstream:    "https://example.com",
-		DefaultScenario:    "Noop",
-		DefaultMaxVariants: 5,
+		DefaultPort:     8080,
+		DefaultUpstream: "https://example.com",
+		DefaultScenario: "Noop",
 	})
 	if code != 0 {
 		t.Fatalf("expected exit code 0, got %%d", code)

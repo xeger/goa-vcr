@@ -65,7 +65,7 @@ func (v *VCR) WriteStub(endpointName string, req RequestSpec, resp ResponseMeta,
 		return fmt.Errorf("no write root configured")
 	}
 
-	harPath := filepath.Join(root, stubKey(endpointName, div)+".vcr.har")
+	harPath := filepath.Join(root, StubHARFileName(endpointName, div))
 	jsonPath := blobPathForHARPath(harPath)
 
 	if err := os.WriteFile(jsonPath, body, 0600); err != nil {
@@ -81,7 +81,7 @@ func (v *VCR) findStub(endpointName string, diversifier string) (*stub, error) {
 	if v.Root == "" {
 		return nil, os.ErrNotExist
 	}
-	harPath := filepath.Join(v.Root, stubKey(endpointName, diversifier)+".vcr.har")
+	harPath := filepath.Join(v.Root, StubHARFileName(endpointName, diversifier))
 	stub, err := readStub(harPath)
 	if err == nil {
 		return stub, nil
@@ -116,4 +116,10 @@ func stubKey(endpointName, diversifier string) string {
 		return endpointName
 	}
 	return strings.Join([]string{endpointName, diversifier}, "--")
+}
+
+// StubHARFileName returns the on-disk HAR filename for a stub (under the VCR
+// root), e.g. "ListThings.vcr.har" or "ListThings--p-abc--q-def.vcr.har".
+func StubHARFileName(endpointName, diversifier string) string {
+	return stubKey(endpointName, diversifier) + ".vcr.har"
 }

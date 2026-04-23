@@ -251,6 +251,9 @@ func TestRecordingTransport_AuthorizationGate(t *testing.T) {
 			"claims": {
 				"sub": "deadbeef"
 			}
+		},
+		"endpoints": {
+			"GetThing": { "variant": { "path": false } }
 		}
 	}`
 	if err := os.WriteFile(filepath.Join(tmp, PolicyFileName), []byte(policyJSON), 0600); err != nil {

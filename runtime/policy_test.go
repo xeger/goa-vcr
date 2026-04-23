@@ -9,9 +9,9 @@ func TestPolicyQueryVariantDefaultEnabled(t *testing.T) {
 	}
 }
 
-func TestPolicyPathVariantDefaultDisabled(t *testing.T) {
+func TestPolicyPathVariantDefaultEnabled(t *testing.T) {
 	enabled, explicit := (Policy{}).PathVariantEnabled("X")
-	if enabled || explicit {
+	if !enabled || explicit {
 		t.Fatalf("unexpected: enabled=%v explicit=%v", enabled, explicit)
 	}
 }
