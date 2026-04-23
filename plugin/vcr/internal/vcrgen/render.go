@@ -168,7 +168,7 @@ func NewPlaybackHandler(svc {{ .ServicePkgName }}.Service) (http.Handler, error)
 	}
 	mux := goahttp.NewMuxer()
 
-	eps := {{ .ServicePkgName }}.NewEndpoints(svc)
+eps := {{ .ServicePkgName }}.NewEndpoints(svc, nil)
 
 	errHandler := func(ctx context.Context, w http.ResponseWriter, err error) {
 		// Keep this minimal: callers may install their own goa error formatter higher up.
