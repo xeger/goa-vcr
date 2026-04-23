@@ -5,6 +5,7 @@ type ServiceSpec struct {
 	ServicePathName string
 	ServicePkgName  string
 	HasWebSocket    bool
+	HasRawResponse  bool
 	// HasViewedResult indicates at least one endpoint needs dynamic view lookup
 	// from payload and therefore requires viewFromPayload/reflect support.
 	HasViewedResult bool
@@ -12,11 +13,12 @@ type ServiceSpec struct {
 }
 
 type EndpointSpec struct {
-	MethodName    string
-	MethodVarName string
-	PayloadRef    string
-	ResultRef     string
-	IsStreaming   bool
+	MethodName     string
+	MethodVarName  string
+	PayloadRef     string
+	ResultRef      string
+	IsStreaming    bool
+	HasRawResponse bool
 	// ViewedResultInitName is the name of the generated helper that constructs the
 	// viewed result wrapper from the service result, e.g. NewViewedOrganizationCollection.
 	// Empty when the method does not return a viewed result.

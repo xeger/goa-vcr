@@ -45,9 +45,13 @@ func BuildServiceSpec(genpkg string, svc *httpcodegen.ServiceData) ServiceSpec {
 			PayloadRef:           payloadRef,
 			ResultRef:            resultRef,
 			IsStreaming:          httpcodegen.IsWebSocketEndpoint(ed) || httpcodegen.IsSSEEndpoint(ed),
+			HasRawResponse:       ed.Method.SkipResponseBodyEncodeDecode,
 			ViewedResultInitName: viewedInitName,
 			ViewedResultViewName: viewedViewName,
 			ReturnsViewName:      returnsViewName,
+		}
+		if ep.HasRawResponse {
+			spec.HasRawResponse = true
 		}
 		for _, r := range ed.Routes {
 			if r.Verb == "OPTIONS" {

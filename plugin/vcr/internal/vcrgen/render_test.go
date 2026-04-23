@@ -254,6 +254,53 @@ func TestRenderServiceVCR_ResultErrorPathsUseTypedZeroValue(t *testing.T) {
 	assertNotContains(t, src, `return nil, "", fmt.Errorf("vcr: scenario handler for GetViewedID has unexpected type %T", h)`)
 }
 
+func TestRenderServiceVCR_SkipResponseBodyEncodeDecodeShapes(t *testing.T) {
+	spec := ServiceSpec{
+		GenPkg:          "github.com/example/proj/gen",
+		ServicePathName: "toyraw",
+		ServicePkgName:  "toyraw",
+		HasRawResponse:  true,
+		Endpoints: []EndpointSpec{
+			{
+				MethodVarName:  "GetRawOnly",
+				PayloadRef:     "*toyraw.GetRawOnlyPayload",
+				HasRawResponse: true,
+				Routes:         []RouteSpec{{Verb: "GET", Path: "/raw-only"}},
+			},
+			{
+				MethodVarName:  "GetRawWithResult",
+				PayloadRef:     "*toyraw.GetRawWithResultPayload",
+				ResultRef:      "*toyraw.Thing",
+				HasRawResponse: true,
+				Routes:         []RouteSpec{{Verb: "GET", Path: "/raw-with-result"}},
+			},
+		},
+	}
+
+	f := RenderServiceVCR(spec)
+	outDir := t.TempDir()
+	outPath, err := f.Render(outDir)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	src := string(data)
+
+	assertContains(t, src, `"io"`)
+
+	assertContains(t, src, `type ServiceGetRawOnlyFunc func(context.Context, *toyraw.GetRawOnlyPayload, toyraw.Service) (io.ReadCloser, error)`)
+	assertContains(t, src, `func (s *Scenario) GetRawOnly(ctx context.Context, p *toyraw.GetRawOnlyPayload) (io.ReadCloser, error)`)
+	assertContains(t, src, `func (b *backgroundService) GetRawOnly(ctx context.Context, p *toyraw.GetRawOnlyPayload) (io.ReadCloser, error)`)
+
+	assertContains(t, src, `type ServiceGetRawWithResultFunc func(context.Context, *toyraw.GetRawWithResultPayload, toyraw.Service) (*toyraw.Thing, io.ReadCloser, error)`)
+	assertContains(t, src, `func (s *Scenario) GetRawWithResult(ctx context.Context, p *toyraw.GetRawWithResultPayload) (*toyraw.Thing, io.ReadCloser, error)`)
+	assertContains(t, src, `func (b *backgroundService) GetRawWithResult(ctx context.Context, p *toyraw.GetRawWithResultPayload) (*toyraw.Thing, io.ReadCloser, error)`)
+	assertContains(t, src, `return zeroValue[*toyraw.Thing](), nil, fmt.Errorf("vcr: scenario handler for GetRawWithResult has unexpected type %T", h)`)
+}
+
 func assertContains(t *testing.T, haystack, needle string) {
 	t.Helper()
 	if !strings.Contains(haystack, needle) {

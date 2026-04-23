@@ -26,6 +26,9 @@ func RenderServiceVCR(spec ServiceSpec) *codegen.File {
 	if spec.HasViewedResult {
 		imports = append(imports, codegen.SimpleImport("reflect"))
 	}
+	if spec.HasRawResponse {
+		imports = append(imports, codegen.SimpleImport("io"))
+	}
 	if spec.HasWebSocket {
 		imports = append(imports, codegen.SimpleImport("github.com/gorilla/websocket"))
 	}
@@ -194,6 +197,10 @@ func NewPlaybackHandler(svc {{ .ServicePkgName }}.Service) (http.Handler, error)
 // Service{{ .MethodVarName }}Func is the typed scenario handler signature for {{ .MethodVarName }}.
 {{- if .IsStreaming }}
 type Service{{ .MethodVarName }}Func func(context.Context, {{ .PayloadRef }}, {{ $.ServicePkgName }}.{{ .MethodVarName }}ServerStream) error
+{{- else if and .HasRawResponse .ResultRef }}
+type Service{{ .MethodVarName }}Func func(context.Context, {{ .PayloadRef }}, {{ $.ServicePkgName }}.Service) ({{ .ResultRef }}, io.ReadCloser, error)
+{{- else if .HasRawResponse }}
+type Service{{ .MethodVarName }}Func func(context.Context, {{ .PayloadRef }}, {{ $.ServicePkgName }}.Service) (io.ReadCloser, error)
 {{- else if .ResultRef }}
 type Service{{ .MethodVarName }}Func func(context.Context, {{ .PayloadRef }}, {{ $.ServicePkgName }}.Service) ({{ .ResultRef }}, error)
 {{- else }}
@@ -225,6 +232,40 @@ func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}
 
 func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}, stream {{ $.ServicePkgName }}.{{ .MethodVarName }}ServerStream) error {
 	return fmt.Errorf("vcr: no scenario handler for {{ .MethodVarName }} and no recorded-stream background is available")
+}
+{{ else if and .HasRawResponse .ResultRef }}
+func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, io.ReadCloser, error) {
+	if h := s.queue.Next("{{ .MethodVarName }}"); h != nil {
+		fn, ok := h.(Service{{ .MethodVarName }}Func)
+		if !ok {
+			return zeroValue[{{ .ResultRef }}](), nil, fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", h)
+		}
+		return fn(ctx, p, s.next)
+	}
+	return s.next.{{ .MethodVarName }}(ctx, p)
+}
+
+func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, io.ReadCloser, error) {
+	res, body, err := b.hc.{{ .MethodVarName }}(ctx, p)
+	if err != nil {
+		return zeroValue[{{ .ResultRef }}](), nil, err
+	}
+	return res, body, nil
+}
+{{ else if .HasRawResponse }}
+func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) (io.ReadCloser, error) {
+	if h := s.queue.Next("{{ .MethodVarName }}"); h != nil {
+		fn, ok := h.(Service{{ .MethodVarName }}Func)
+		if !ok {
+			return nil, fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", h)
+		}
+		return fn(ctx, p, s.next)
+	}
+	return s.next.{{ .MethodVarName }}(ctx, p)
+}
+
+func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) (io.ReadCloser, error) {
+	return b.hc.{{ .MethodVarName }}(ctx, p)
 }
 {{ else if and .ResultRef .ReturnsViewName }}
 // {{ .MethodVarName }} dispatches to the handler queue (if any) or delegates.
