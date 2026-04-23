@@ -5,4 +5,3 @@
 //
 //	import _ "github.com/xeger/goa-vcr/plugin/vcr"
 package vcr
-

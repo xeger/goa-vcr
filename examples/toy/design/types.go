@@ -42,4 +42,3 @@ var ThingSubscription = Type("ThingSubscription", func() {
 	Attribute("msg", String, "Client message")
 	Required("msg")
 })
-

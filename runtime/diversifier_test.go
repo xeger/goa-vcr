@@ -32,4 +32,3 @@ func TestRequestDiversifierRespectsPolicyDefaults(t *testing.T) {
 		t.Fatalf("expected query diversifier prefix, got %q", div)
 	}
 }
-

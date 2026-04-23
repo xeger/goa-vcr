@@ -101,4 +101,3 @@ func TestRecordingTransportVariantHeuristicDisablesQuery(t *testing.T) {
 		t.Fatalf("expected undiversified stub after heuristic trigger")
 	}
 }
-

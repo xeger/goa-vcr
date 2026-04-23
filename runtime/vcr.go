@@ -180,4 +180,3 @@ func readPolicy(dir string) (Policy, error) {
 	}
 	return policy, nil
 }
-

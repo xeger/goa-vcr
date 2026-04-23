@@ -77,4 +77,3 @@ func mustRequest(t *testing.T, method, rawurl string) *http.Request {
 	}
 	return req
 }
-

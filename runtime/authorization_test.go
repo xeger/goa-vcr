@@ -203,9 +203,9 @@ func TestPolicyValidate_ValidScalarClaims(t *testing.T) {
 	policy := Policy{
 		Authorization: &AuthorizationPolicy{
 			Claims: map[string]any{
-				"sub": "deadbeef",
-				"exp": 1234567890,
-				"admin": true,
+				"sub":     "deadbeef",
+				"exp":     1234567890,
+				"admin":   true,
 				"nullval": nil,
 			},
 		},
@@ -219,7 +219,7 @@ func TestPolicyValidate_InvalidNonScalarClaim(t *testing.T) {
 	policy := Policy{
 		Authorization: &AuthorizationPolicy{
 			Claims: map[string]any{
-				"sub": "deadbeef",
+				"sub":   "deadbeef",
 				"roles": []string{"admin", "user"}, // array is not a scalar
 			},
 		},
@@ -233,7 +233,7 @@ func TestPolicyValidate_InvalidObjectClaim(t *testing.T) {
 	policy := Policy{
 		Authorization: &AuthorizationPolicy{
 			Claims: map[string]any{
-				"sub": "deadbeef",
+				"sub":      "deadbeef",
 				"metadata": map[string]any{"key": "value"}, // object is not a scalar
 			},
 		},

@@ -22,7 +22,7 @@ type EndpointSpec struct {
 	// ViewedResultViewName is the fixed view name to use when the method has at most
 	// one view. Empty when view selection is dynamic.
 	ViewedResultViewName string
-	Routes []RouteSpec
+	Routes               []RouteSpec
 }
 
 type RouteSpec struct {

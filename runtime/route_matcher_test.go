@@ -24,4 +24,3 @@ func TestRouteMatcherMatch(t *testing.T) {
 		t.Fatalf("unexpected vars: %#v", vars)
 	}
 }
-

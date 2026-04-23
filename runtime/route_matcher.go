@@ -67,4 +67,3 @@ type noopResponseWriter struct{}
 func (noopResponseWriter) Header() http.Header       { return http.Header{} }
 func (noopResponseWriter) Write([]byte) (int, error) { return 0, nil }
 func (noopResponseWriter) WriteHeader(int)           {}
-
