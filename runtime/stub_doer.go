@@ -2,11 +2,16 @@ package runtime
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+
+	"goa.design/clue/log"
 )
 
 // StubDoer serves HTTP responses from VCR stubs by matching requests against a
@@ -15,6 +20,11 @@ type StubDoer struct {
 	Store   *VCR
 	Matcher *RouteMatcher
 }
+
+var (
+	errPlaybackRouteMiss = errors.New("vcr: playback route miss")
+	errPlaybackStubMiss  = errors.New("vcr: playback stub miss")
+)
 
 func NewStubDoer(store *VCR, endpoints []Endpoint) *StubDoer {
 	return &StubDoer{
@@ -30,14 +40,28 @@ func (d *StubDoer) Do(req *http.Request) (*http.Response, error) {
 
 	endpointName, vars, ok := d.Matcher.Match(req)
 	if !ok {
-		return vcrErrorResponse(req, http.StatusNotImplemented, "vcr: unstubbed endpoint"), nil
+		log.Error(playbackLogContext(req), errPlaybackRouteMiss,
+			log.KV{K: "vcr.action", V: "playback_route_miss"},
+			log.KV{K: "http.method", V: req.Method},
+			log.KV{K: "http.path", V: req.URL.Path},
+			log.KV{K: "msg", V: "playback request did not match any configured route"},
+		)
+		return vcrErrorResponse(req, http.StatusNotImplemented, fmt.Sprintf("vcr: unrecognized route: %s %s", req.Method, req.URL.Path)), nil
 	}
 
 	div := RequestDiversifier(d.Store.Policy, endpointName, req.URL.Query(), vars)
 	meta, body, err := d.Store.ReadResponse(endpointName, div)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return vcrErrorResponse(req, http.StatusNotImplemented, "vcr: unstubbed endpoint"), nil
+			stubFile := StubHARFileName(endpointName, div)
+			log.Error(playbackLogContext(req,
+				log.KV{K: "vcr.endpoint.name", V: endpointName},
+				log.KV{K: "vcr.stub.file", V: stubFile},
+			), errPlaybackStubMiss,
+				log.KV{K: "vcr.action", V: "playback_stub_miss"},
+				log.KV{K: "msg", V: "playback request matched route but stub file was missing"},
+			)
+			return vcrErrorResponse(req, http.StatusNotImplemented, fmt.Sprintf("vcr: unstubbed endpoint: missing %s", stubFile)), nil
 		}
 		return vcrErrorResponse(req, http.StatusInternalServerError, "vcr: failed to read stub"), nil
 	}
@@ -68,6 +92,17 @@ func (d *StubDoer) Do(req *http.Request) (*http.Response, error) {
 	}, nil
 }
 
+func playbackLogContext(req *http.Request, keyvals ...log.Fielder) context.Context {
+	ctx := context.Background()
+	if req != nil {
+		ctx = req.Context()
+	}
+	if len(keyvals) == 0 {
+		return ctx
+	}
+	return log.With(ctx, keyvals...)
+}
+
 func vcrErrorResponse(req *http.Request, status int, msg string) *http.Response {
 	b := []byte(msg)
 	h := make(http.Header, 2)
@@ -81,4 +116,3 @@ func vcrErrorResponse(req *http.Request, status int, msg string) *http.Response 
 		Request:       req,
 	}
 }
-

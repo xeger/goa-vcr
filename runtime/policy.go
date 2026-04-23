@@ -22,14 +22,14 @@ func (p Policy) QueryVariantEnabled(endpointName string) (bool, bool) {
 }
 
 // PathVariantEnabled returns (enabled, explicit) for endpoints[name].variant.path.
-// If explicit is false, enabled defaults to false.
+// If explicit is false, enabled defaults to true.
 func (p Policy) PathVariantEnabled(endpointName string) (bool, bool) {
 	if p.Endpoints == nil {
-		return false, false
+		return true, false
 	}
 	ep, ok := p.Endpoints[endpointName]
 	if !ok || ep.Variant == nil || ep.Variant.Path == nil {
-		return false, false
+		return true, false
 	}
 	return *ep.Variant.Path, true
 }
