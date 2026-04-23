@@ -5,6 +5,8 @@ type ServiceSpec struct {
 	ServicePathName string
 	ServicePkgName  string
 	HasWebSocket    bool
+	// HasViewedResult indicates at least one endpoint needs dynamic view lookup
+	// from payload and therefore requires viewFromPayload/reflect support.
 	HasViewedResult bool
 	Endpoints       []EndpointSpec
 }
@@ -22,7 +24,10 @@ type EndpointSpec struct {
 	// ViewedResultViewName is the fixed view name to use when the method has at most
 	// one view. Empty when view selection is dynamic.
 	ViewedResultViewName string
-	Routes               []RouteSpec
+	// ReturnsViewName indicates this endpoint's Service method signature includes a
+	// dynamic view return value: (res, view string, err).
+	ReturnsViewName bool
+	Routes          []RouteSpec
 }
 
 type RouteSpec struct {

@@ -28,10 +28,15 @@ func BuildServiceSpec(genpkg string, svc *httpcodegen.ServiceData) ServiceSpec {
 
 		var viewedInitName string
 		var viewedViewName string
+		returnsViewName := false
 		if ed.Method.ViewedResult != nil && ed.Method.ViewedResult.Init != nil {
 			viewedInitName = ed.Method.ViewedResult.Init.Name
 			viewedViewName = ed.Method.ViewedResult.ViewName
-			spec.HasViewedResult = true
+			// Goa emits a view return only when view selection is dynamic.
+			returnsViewName = viewedViewName == ""
+			if returnsViewName {
+				spec.HasViewedResult = true
+			}
 		}
 
 		ep := EndpointSpec{
@@ -42,6 +47,7 @@ func BuildServiceSpec(genpkg string, svc *httpcodegen.ServiceData) ServiceSpec {
 			IsStreaming:          httpcodegen.IsWebSocketEndpoint(ed) || httpcodegen.IsSSEEndpoint(ed),
 			ViewedResultInitName: viewedInitName,
 			ViewedResultViewName: viewedViewName,
+			ReturnsViewName:      returnsViewName,
 		}
 		for _, r := range ed.Routes {
 			if r.Verb == "OPTIONS" {

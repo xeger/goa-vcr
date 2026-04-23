@@ -140,6 +140,7 @@ func TestRenderServiceVCR_ViewedResultWrapsInsideScenarioAndBackground(t *testin
 				IsStreaming:          false,
 				ViewedResultInitName: "NewViewedThingWithViews",
 				ViewedResultViewName: "",
+				ReturnsViewName:      true,
 				Routes:               []RouteSpec{{Verb: "GET", Path: "/things/{id}/viewed"}},
 			},
 		},
@@ -168,6 +169,89 @@ func TestRenderServiceVCR_ViewedResultWrapsInsideScenarioAndBackground(t *testin
 	assertContains(t, src, `func (s *Scenario) GetThingViewed(ctx context.Context, p *toyviews.GetThingViewedPayload) (*toyviews.ThingWithViews, string, error)`)
 	assertContains(t, src, `func (b *backgroundService) GetThingViewed(ctx context.Context, p *toyviews.GetThingViewedPayload) (*toyviews.ThingWithViews, string, error)`)
 	assertContains(t, src, `type ServiceGetThingViewedFunc func(context.Context, *toyviews.GetThingViewedPayload, toyviews.Service) (*toyviews.ThingWithViews, error)`)
+}
+
+func TestRenderServiceVCR_ViewedResultSingleViewOmitsViewReturn(t *testing.T) {
+	spec := ServiceSpec{
+		GenPkg:          "github.com/example/proj/gen",
+		ServicePathName: "toyviewdefault",
+		ServicePkgName:  "toyviewdefault",
+		HasWebSocket:    false,
+		Endpoints: []EndpointSpec{
+			{
+				MethodVarName:        "GetThingViewedDefaultOnly",
+				PayloadRef:           "*toyviewdefault.GetThingViewedDefaultOnlyPayload",
+				ResultRef:            "*toyviewdefault.ThingWithViews",
+				IsStreaming:          false,
+				ViewedResultInitName: "NewViewedThingWithViews",
+				ViewedResultViewName: "default",
+				Routes:               []RouteSpec{{Verb: "GET", Path: "/things/{id}/viewed-default"}},
+			},
+		},
+	}
+
+	f := RenderServiceVCR(spec)
+	outDir := t.TempDir()
+	outPath, err := f.Render(outDir)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	src := string(data)
+
+	assertNotContains(t, src, `"reflect"`)
+	assertNotContains(t, src, `func viewFromPayload`)
+
+	assertContains(t, src, `func (s *Scenario) GetThingViewedDefaultOnly(ctx context.Context, p *toyviewdefault.GetThingViewedDefaultOnlyPayload) (*toyviewdefault.ThingWithViews, error)`)
+	assertContains(t, src, `func (b *backgroundService) GetThingViewedDefaultOnly(ctx context.Context, p *toyviewdefault.GetThingViewedDefaultOnlyPayload) (*toyviewdefault.ThingWithViews, error)`)
+	assertNotContains(t, src, `func (s *Scenario) GetThingViewedDefaultOnly(ctx context.Context, p *toyviewdefault.GetThingViewedDefaultOnlyPayload) (*toyviewdefault.ThingWithViews, string, error)`)
+}
+
+func TestRenderServiceVCR_ResultErrorPathsUseTypedZeroValue(t *testing.T) {
+	spec := ServiceSpec{
+		GenPkg:          "github.com/example/proj/gen",
+		ServicePathName: "toyvalue",
+		ServicePkgName:  "toyvalue",
+		Endpoints: []EndpointSpec{
+			{
+				MethodVarName: "GetID",
+				PayloadRef:    "*toyvalue.GetIDPayload",
+				ResultRef:     "toyvalue.UUID",
+				Routes:        []RouteSpec{{Verb: "GET", Path: "/id"}},
+			},
+			{
+				MethodVarName:        "GetViewedID",
+				PayloadRef:           "*toyvalue.GetViewedIDPayload",
+				ResultRef:            "toyvalue.UUID",
+				ViewedResultInitName: "NewViewedUUID",
+				ReturnsViewName:      true,
+				Routes:               []RouteSpec{{Verb: "GET", Path: "/id/viewed"}},
+			},
+		},
+		HasViewedResult: true,
+	}
+
+	f := RenderServiceVCR(spec)
+	outDir := t.TempDir()
+	outPath, err := f.Render(outDir)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	src := string(data)
+
+	assertContains(t, src, `func zeroValue[T any]() T`)
+	assertContains(t, src, `return zeroValue[toyvalue.UUID](), fmt.Errorf("vcr: scenario handler for GetID has unexpected type %T", h)`)
+	assertContains(t, src, `return zeroValue[toyvalue.UUID](), "", fmt.Errorf("vcr: scenario handler for GetViewedID has unexpected type %T", h)`)
+	assertContains(t, src, `return zeroValue[toyvalue.UUID](), "", err`)
+	assertNotContains(t, src, `return nil, fmt.Errorf("vcr: scenario handler for GetID has unexpected type %T", h)`)
+	assertNotContains(t, src, `return nil, "", fmt.Errorf("vcr: scenario handler for GetViewedID has unexpected type %T", h)`)
 }
 
 func assertContains(t *testing.T, haystack, needle string) {

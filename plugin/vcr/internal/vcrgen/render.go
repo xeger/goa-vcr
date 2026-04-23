@@ -99,6 +99,11 @@ func Stack(bg {{ .ServicePkgName }}.Service, layers ...func({{ .ServicePkgName }
 	return result
 }
 
+func zeroValue[T any]() T {
+	var z T
+	return z
+}
+
 {{- if .HasViewedResult }}
 func viewFromPayload(p any) string {
 	const def = "default"
@@ -221,7 +226,7 @@ func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}
 func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}, stream {{ $.ServicePkgName }}.{{ .MethodVarName }}ServerStream) error {
 	return fmt.Errorf("vcr: no scenario handler for {{ .MethodVarName }} and no recorded-stream background is available")
 }
-{{ else if and .ResultRef .ViewedResultInitName }}
+{{ else if and .ResultRef .ReturnsViewName }}
 // {{ .MethodVarName }} dispatches to the handler queue (if any) or delegates.
 // Handlers return the plain result type and the selected view name; the Goa
 // endpoint layer (NewEndpoints) is responsible for wrapping to the viewed type.
@@ -229,17 +234,13 @@ func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}
 	if h := s.queue.Next("{{ .MethodVarName }}"); h != nil {
 		fn, ok := h.(Service{{ .MethodVarName }}Func)
 		if !ok {
-			return nil, "", fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", h)
+			return zeroValue[{{ .ResultRef }}](), "", fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", h)
 		}
 		res, err := fn(ctx, p, s.next)
 		if err != nil {
-			return nil, "", err
+			return zeroValue[{{ .ResultRef }}](), "", err
 		}
-		{{- if .ViewedResultViewName }}
-		return res, {{ printf "%q" .ViewedResultViewName }}, nil
-		{{- else }}
 		return res, viewFromPayload(p), nil
-		{{- end }}
 	}
 	return s.next.{{ .MethodVarName }}(ctx, p)
 }
@@ -247,20 +248,16 @@ func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}
 func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, string, error) {
 	res, err := b.hc.{{ .MethodVarName }}(ctx, p)
 	if err != nil {
-		return nil, "", err
+		return zeroValue[{{ .ResultRef }}](), "", err
 	}
-	{{- if .ViewedResultViewName }}
-	return res, {{ printf "%q" .ViewedResultViewName }}, nil
-	{{- else }}
 	return res, viewFromPayload(p), nil
-	{{- end }}
 }
 {{ else if .ResultRef }}
 func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, error) {
 	if h := s.queue.Next("{{ .MethodVarName }}"); h != nil {
 		fn, ok := h.(Service{{ .MethodVarName }}Func)
 		if !ok {
-			return nil, fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", h)
+			return zeroValue[{{ .ResultRef }}](), fmt.Errorf("vcr: scenario handler for {{ .MethodVarName }} has unexpected type %T", h)
 		}
 		return fn(ctx, p, s.next)
 	}
