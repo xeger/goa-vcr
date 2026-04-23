@@ -67,7 +67,7 @@ func TestRenderServiceVCR_UnaryEmitsScenarioAsService(t *testing.T) {
 
 	// Simplified NewPlaybackHandler.
 	assertContains(t, src, `func NewPlaybackHandler(svc toy.Service) (http.Handler, error)`)
-	assertContains(t, src, `eps := toy.NewEndpoints(svc, nil)`)
+	assertContains(t, src, `eps := toy.NewEndpoints(svc)`)
 
 	// Removed surface must be absent.
 	assertNotContains(t, src, `IsLoopback`)

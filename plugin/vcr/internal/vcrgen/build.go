@@ -8,10 +8,11 @@ import (
 
 func BuildServiceSpec(genpkg string, svc *httpcodegen.ServiceData) ServiceSpec {
 	spec := ServiceSpec{
-		GenPkg:          genpkg,
-		ServicePathName: svc.Service.PathName,
-		ServicePkgName:  svc.Service.PkgName,
-		HasWebSocket:    httpcodegen.HasWebSocket(svc),
+		GenPkg:                genpkg,
+		ServicePathName:       svc.Service.PathName,
+		ServicePkgName:        svc.Service.PkgName,
+		HasWebSocket:          httpcodegen.HasWebSocket(svc),
+		HasServerInterceptors: len(svc.Service.ServerInterceptors) > 0,
 	}
 
 	for _, ed := range svc.Endpoints {
