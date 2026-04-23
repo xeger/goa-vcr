@@ -65,7 +65,7 @@ type (
 
 	VariantPolicy struct {
 		// Query controls whether query strings participate in stub variants.
-		// If nil, query variants are enabled and may be auto-tuned by heuristics.
+		// If nil, query variants are enabled.
 		Query *bool `json:"query,omitempty"`
 		// Path controls whether route params participate in stub variants.
 		// If nil, path variants are enabled.

@@ -61,7 +61,6 @@ type CLIConfig struct {
 	DefaultPort      int
 	DefaultUpstream  string
 	DefaultScenario  string
-	DefaultMaxVariants int
 }
 
 // Usage returns a full CLI usage string.
@@ -133,9 +132,6 @@ func normalizeCLIConfig(cfg CLIConfig) CLIConfig {
 	}
 	if cfg.DefaultScenario == "" {
 		cfg.DefaultScenario = "Noop"
-	}
-	if cfg.DefaultMaxVariants == 0 {
-		cfg.DefaultMaxVariants = 5
 	}
 	if cfg.ScenarioRegistry == nil {
 		cfg.ScenarioRegistry = map[string]ScenarioFactory{}
@@ -322,7 +318,6 @@ func cmdRecord(args []string, cfg CLIConfig) int {
 	var upstreamFlag stringFlag
 	upstreamFlag.value = cfg.DefaultUpstream
 	fs.Var(&upstreamFlag, "upstream", "Upstream base URL when creating a policy")
-	maxVariantsFlag := fs.Int("max-variants", cfg.DefaultMaxVariants, "Max distinct query variants per endpoint before auto-ignoring query (heuristic)")
 
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr,
@@ -331,11 +326,6 @@ func cmdRecord(args []string, cfg CLIConfig) int {
 				"If vcr.json is missing, it will be created using -upstream.\n\n"+
 				"If vcr.json sets endpoints.<EndpointName>.variant.query=false, then query strings\n"+
 				"are ignored for that endpoint (stubs will be undiversified).\n\n"+
-				"Heuristic: if an endpoint records more than -max-variants distinct query variants\n"+
-				"in one session and policy does not explicitly set variant.query, the recorder will:\n"+
-				"  - persist endpoints.<EndpointName>.variant.query=false\n"+
-				"  - delete existing stubs for that endpoint\n"+
-				"  - wait for the next call to record the undiversified stub\n\n"+
 				"Options:\n",
 			cfg.AppName,
 		)
@@ -396,7 +386,7 @@ func cmdRecord(args []string, cfg CLIConfig) int {
 	}
 
 	proxy := httputil.NewSingleHostReverseProxy(upstreamURL)
-	proxy.Transport = vcrruntime.NewRecordingTransport(ctx, store, endpoints, proxy.Transport, *maxVariantsFlag)
+	proxy.Transport = vcrruntime.NewRecordingTransport(ctx, store, endpoints, proxy.Transport, 0)
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)

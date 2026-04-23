@@ -7,10 +7,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
-	"sync"
 
 	"goa.design/clue/log"
 )
@@ -23,13 +19,11 @@ type RecordingTransport struct {
 	store   *VCR
 	matcher *RouteMatcher
 	base    http.RoundTripper
-
-	mu           sync.Mutex
-	maxVariants  int
-	variantsSeen map[string]map[string]struct{}
 }
 
-func NewRecordingTransport(ctx context.Context, store *VCR, endpoints []Endpoint, base http.RoundTripper, maxVariants int) *RecordingTransport {
+// NewRecordingTransport creates a recorder transport.
+// The final argument is retained for API compatibility and is ignored.
+func NewRecordingTransport(ctx context.Context, store *VCR, endpoints []Endpoint, base http.RoundTripper, _ int) *RecordingTransport {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -37,12 +31,10 @@ func NewRecordingTransport(ctx context.Context, store *VCR, endpoints []Endpoint
 		base = http.DefaultTransport
 	}
 	return &RecordingTransport{
-		ctx:          ctx,
-		store:        store,
-		matcher:      NewRouteMatcher(endpoints),
-		base:         base,
-		maxVariants:  maxVariants,
-		variantsSeen: map[string]map[string]struct{}{},
+		ctx:     ctx,
+		store:   store,
+		matcher: NewRouteMatcher(endpoints),
+		base:    base,
 	}
 }
 
@@ -70,24 +62,6 @@ func (t *RecordingTransport) RoundTrip(req *http.Request) (*http.Response, error
 	// Check authorization policy: if claims don't match, skip recording.
 	if !t.store.Policy.AllowRecord(req) {
 		return resp, err
-	}
-
-	// If policy/query options are implicit and we exceed max variants, flip policy and delete stubs.
-	if div != "" {
-		if _, explicit := t.store.Policy.QueryVariantEnabled(endpointName); !explicit {
-			if triggered := t.observeVariantAndMaybeDisableQuery(endpointName, div); triggered {
-				log.Warn(log.With(t.ctx,
-					log.KV{K: "vcr.endpoint.name", V: endpointName},
-					log.KV{K: "vcr.variant", V: div},
-				),
-					log.KV{K: "vcr.action", V: "heuristic"},
-					log.KV{K: "vcr.heuristic", V: "variant.query"},
-					log.KV{K: "vcr.max_variants", V: t.maxVariants},
-					log.KV{K: "msg", V: "too many query variants; auto-setting endpoints.<name>.variant.query=false and deleting existing stubs"},
-				)
-				return resp, err // wait for next call to record undiversified stub
-			}
-		}
 	}
 
 	body, readErr := io.ReadAll(resp.Body)
@@ -145,65 +119,6 @@ func (t *RecordingTransport) RoundTrip(req *http.Request) (*http.Response, error
 
 	log.Info(ctx, log.KV{K: "vcr.action", V: action})
 	return resp, err
-}
-
-func (t *RecordingTransport) observeVariantAndMaybeDisableQuery(endpointName, diversifier string) bool {
-	if t.maxVariants <= 0 {
-		return false
-	}
-
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	// Ignore heuristic if user explicitly set variant.query (true or false).
-	if _, explicit := t.store.Policy.QueryVariantEnabled(endpointName); explicit {
-		return false
-	}
-
-	seen := t.variantsSeen[endpointName]
-	if seen == nil {
-		seen = map[string]struct{}{}
-		t.variantsSeen[endpointName] = seen
-	}
-	seen[diversifier] = struct{}{}
-	if len(seen) <= t.maxVariants {
-		return false
-	}
-
-	t.store.Policy.SetVariantQuery(endpointName, false)
-	if err := t.store.WritePolicy(); err != nil {
-		log.Error(t.ctx, err, log.KV{K: "msg", V: "failed to persist policy update"})
-		t.store.Policy.ClearVariantQuery(endpointName)
-		return false
-	}
-
-	t.deleteEndpointStubs(endpointName)
-	delete(t.variantsSeen, endpointName)
-	return true
-}
-
-func (t *RecordingTransport) deleteEndpointStubs(endpointName string) {
-	entries, err := os.ReadDir(t.store.Root)
-	if err != nil {
-		log.Error(t.ctx, err, log.KV{K: "msg", V: "failed to read stub dir for deletion"})
-		return
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if name == PolicyFileName {
-			continue
-		}
-		if !strings.HasSuffix(name, ".vcr.har") && !strings.HasSuffix(name, ".vcr.json") {
-			continue
-		}
-		if name == endpointName+".vcr.har" || name == endpointName+".vcr.json" || strings.HasPrefix(name, endpointName+"--") {
-			_ = os.Remove(filepath.Join(t.store.Root, name))
-		}
-	}
 }
 
 func formatJSONBlob(body []byte, headers http.Header) ([]byte, string) {

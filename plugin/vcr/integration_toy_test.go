@@ -410,7 +410,6 @@ func TestVCRCLI_Usage(t *testing.T) {
 		DefaultPort:      8080,
 		DefaultUpstream:  "https://example.com",
 		DefaultScenario:  "Noop",
-		DefaultMaxVariants: 5,
 	})
 	if code != 0 {
 		t.Fatalf("expected exit code 0, got %%d", code)
