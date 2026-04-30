@@ -3,7 +3,6 @@ package runtime
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,11 +20,6 @@ type StubDoer struct {
 	Matcher *RouteMatcher
 }
 
-var (
-	errPlaybackRouteMiss = errors.New("vcr: playback route miss")
-	errPlaybackStubMiss  = errors.New("vcr: playback stub miss")
-)
-
 func NewStubDoer(store *VCR, endpoints []Endpoint) *StubDoer {
 	return &StubDoer{
 		Store:   store,
@@ -40,11 +34,9 @@ func (d *StubDoer) Do(req *http.Request) (*http.Response, error) {
 
 	endpointName, vars, ok := d.Matcher.Match(req)
 	if !ok {
-		log.Error(playbackLogContext(req), errPlaybackRouteMiss,
+		log.Error(playbackLogContext(req), nil,
 			log.KV{K: "vcr.action", V: "playback_route_miss"},
-			log.KV{K: "http.method", V: req.Method},
-			log.KV{K: "http.path", V: req.URL.Path},
-			log.KV{K: "msg", V: "playback request did not match any configured route"},
+			log.KV{K: "http.url", V: req.URL.String()},
 		)
 		return vcrErrorResponse(req, http.StatusNotImplemented, fmt.Sprintf("vcr: unrecognized route: %s %s", req.Method, req.URL.Path)), nil
 	}
@@ -54,12 +46,11 @@ func (d *StubDoer) Do(req *http.Request) (*http.Response, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			stubFile := StubHARFileName(endpointName, div)
-			log.Error(playbackLogContext(req,
+			log.Error(playbackLogContext(req), nil,
+				log.KV{K: "vcr.action", V: "playback_stub_miss"},
 				log.KV{K: "vcr.endpoint.name", V: endpointName},
 				log.KV{K: "vcr.stub.file", V: stubFile},
-			), errPlaybackStubMiss,
-				log.KV{K: "vcr.action", V: "playback_stub_miss"},
-				log.KV{K: "msg", V: "playback request matched route but stub file was missing"},
+				log.KV{K: "http.url", V: req.URL.String()},
 			)
 			return vcrErrorResponse(req, http.StatusNotImplemented, fmt.Sprintf("vcr: unstubbed endpoint: missing %s", stubFile)), nil
 		}
