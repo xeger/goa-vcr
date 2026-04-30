@@ -123,6 +123,56 @@ func TestStubDoerMissingStubLogsError(t *testing.T) {
 	}
 }
 
+func TestStubDoerNonGetReturns405(t *testing.T) {
+	tmp := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmp, PolicyFileName), []byte("{\"upstream\":\"https://example.com\"}\n"), 0600); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+	store, err := New(tmp)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	d := NewStubDoer(store, []Endpoint{
+		{Name: "UpdateSettings", Method: http.MethodPatch, Pattern: "/settings"},
+	})
+
+	var out bytes.Buffer
+	logCtx := log.Context(context.Background(),
+		log.WithOutput(&out),
+		log.WithFormat(log.FormatJSON),
+		log.WithDisableBuffering(func(context.Context) bool { return true }),
+	)
+
+	req := mustRequest(t, http.MethodPatch, "http://example.com/settings").WithContext(logCtx)
+	resp, err := d.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("unexpected status: %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if !strings.Contains(string(body), "scenario handler") {
+		t.Fatalf("body should mention scenario handler, got: %q", string(body))
+	}
+	if !strings.Contains(string(body), "UpdateSettings") {
+		t.Fatalf("body should mention endpoint name, got: %q", string(body))
+	}
+	logged := out.String()
+	for _, want := range []string{
+		`"level":"error"`,
+		`"vcr.action":"playback_method_not_allowed"`,
+		`"vcr.endpoint.name":"UpdateSettings"`,
+		`"http.method":"PATCH"`,
+	} {
+		if !strings.Contains(logged, want) {
+			t.Fatalf("log missing %q: %s", want, logged)
+		}
+	}
+}
+
 func mustRequest(t *testing.T, method, rawurl string) *http.Request {
 	t.Helper()
 	req, err := http.NewRequest(method, rawurl, nil)

@@ -49,6 +49,8 @@ func RenderServiceVCR(spec ServiceSpec) *codegen.File {
 			FuncMap: func() map[string]any {
 				fm := codegen.TemplateFuncs()
 				fm["routesCount"] = routesCount
+				fm["backgroundVerb"] = backgroundVerb
+				fm["isRecordable"] = isRecordable
 				return fm
 			}(),
 			Data: spec,
@@ -246,11 +248,15 @@ func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}
 }
 
 func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, io.ReadCloser, error) {
+	{{- if not (isRecordable .) }}
+	return zeroValue[{{ .ResultRef }}](), nil, vcrruntime.NoScenarioHandler(ctx, "{{ .MethodVarName }}", "{{ backgroundVerb . }}")
+	{{- else }}
 	res, body, err := b.hc.{{ .MethodVarName }}(ctx, p)
 	if err != nil {
 		return zeroValue[{{ .ResultRef }}](), nil, err
 	}
 	return res, body, nil
+	{{- end }}
 }
 {{ else if .HasRawResponse }}
 func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) (io.ReadCloser, error) {
@@ -265,7 +271,11 @@ func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}
 }
 
 func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) (io.ReadCloser, error) {
+	{{- if not (isRecordable .) }}
+	return nil, vcrruntime.NoScenarioHandler(ctx, "{{ .MethodVarName }}", "{{ backgroundVerb . }}")
+	{{- else }}
 	return b.hc.{{ .MethodVarName }}(ctx, p)
+	{{- end }}
 }
 {{ else if and .ResultRef .ReturnsViewName }}
 // {{ .MethodVarName }} dispatches to the handler queue (if any) or delegates.
@@ -287,11 +297,15 @@ func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}
 }
 
 func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, string, error) {
+	{{- if not (isRecordable .) }}
+	return zeroValue[{{ .ResultRef }}](), "", vcrruntime.NoScenarioHandler(ctx, "{{ .MethodVarName }}", "{{ backgroundVerb . }}")
+	{{- else }}
 	res, err := b.hc.{{ .MethodVarName }}(ctx, p)
 	if err != nil {
 		return zeroValue[{{ .ResultRef }}](), "", err
 	}
 	return res, viewFromPayload(p), nil
+	{{- end }}
 }
 {{ else if .ResultRef }}
 func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, error) {
@@ -306,7 +320,11 @@ func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}
 }
 
 func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, error) {
+	{{- if not (isRecordable .) }}
+	return zeroValue[{{ .ResultRef }}](), vcrruntime.NoScenarioHandler(ctx, "{{ .MethodVarName }}", "{{ backgroundVerb . }}")
+	{{- else }}
 	return b.hc.{{ .MethodVarName }}(ctx, p)
+	{{- end }}
 }
 {{ else }}
 func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) error {
@@ -321,11 +339,32 @@ func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}
 }
 
 func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) error {
+	{{- if not (isRecordable .) }}
+	return vcrruntime.NoScenarioHandler(ctx, "{{ .MethodVarName }}", "{{ backgroundVerb . }}")
+	{{- else }}
 	return b.hc.{{ .MethodVarName }}(ctx, p)
+	{{- end }}
 }
 {{ end }}
 {{- end }}
 `
+
+// backgroundVerb returns the HTTP verb the recorded-stub background client
+// will use for an endpoint (the first non-OPTIONS route's verb). Returns ""
+// for endpoints with no routes (e.g. streaming endpoints filtered upstream).
+func backgroundVerb(ep EndpointSpec) string {
+	if len(ep.Routes) == 0 {
+		return ""
+	}
+	return ep.Routes[0].Verb
+}
+
+// isRecordable reports whether an endpoint can be served from recorded stubs.
+// The recorder only captures GET 200 JSON responses, so any non-GET method
+// must be handled by a scenario layer.
+func isRecordable(ep EndpointSpec) bool {
+	return backgroundVerb(ep) == "GET"
+}
 
 func routesCount(endpoints []EndpointSpec) int {
 	n := 0

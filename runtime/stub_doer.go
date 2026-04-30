@@ -41,6 +41,21 @@ func (d *StubDoer) Do(req *http.Request) (*http.Response, error) {
 		return vcrErrorResponse(req, http.StatusNotImplemented, fmt.Sprintf("vcr: unrecognized route: %s %s", req.Method, req.URL.Path)), nil
 	}
 
+	// Recorder captures only GET responses. Any non-GET request that reaches
+	// the stub doer has bypassed the scenario layer (which is the proper home
+	// for mutations) and cannot be served from recordings. Return 405 with a
+	// clear hint rather than the generic "missing stub" 501 — and surface the
+	// fact that there is no recorded background to fall back to.
+	if req.Method != http.MethodGet {
+		log.Error(playbackLogContext(req), nil,
+			log.KV{K: "vcr.action", V: "playback_method_not_allowed"},
+			log.KV{K: "vcr.endpoint.name", V: endpointName},
+			log.KV{K: "http.method", V: req.Method},
+			log.KV{K: "http.url", V: req.URL.String()},
+		)
+		return vcrErrorResponse(req, http.StatusNotImplemented, fmt.Sprintf("vcr: stubs only cover GET; %s %s requires a scenario handler for %s", req.Method, req.URL.Path, endpointName)), nil
+	}
+
 	div := RequestDiversifier(d.Store.Policy, endpointName, req.URL.Query(), vars)
 	meta, body, err := d.Store.ReadResponse(endpointName, div)
 	if err != nil {

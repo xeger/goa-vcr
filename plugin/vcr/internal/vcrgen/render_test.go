@@ -301,6 +301,56 @@ func TestRenderServiceVCR_SkipResponseBodyEncodeDecodeShapes(t *testing.T) {
 	assertContains(t, src, `return zeroValue[*toyraw.Thing](), nil, fmt.Errorf("vcr: scenario handler for GetRawWithResult has unexpected type %T", h)`)
 }
 
+func TestRenderServiceVCR_NonGetBackgroundShortCircuits(t *testing.T) {
+	spec := ServiceSpec{
+		GenPkg:          "github.com/example/proj/gen",
+		ServicePathName: "toymut",
+		ServicePkgName:  "toymut",
+		Endpoints: []EndpointSpec{
+			{
+				MethodVarName: "GetThing",
+				PayloadRef:    "*toymut.GetThingPayload",
+				ResultRef:     "*toymut.Thing",
+				Routes:        []RouteSpec{{Verb: "GET", Path: "/things/{id}"}},
+			},
+			{
+				MethodVarName: "UpdateSettings",
+				PayloadRef:    "*toymut.UpdateSettingsPayload",
+				ResultRef:     "*toymut.Settings",
+				Routes:        []RouteSpec{{Verb: "PATCH", Path: "/settings"}},
+			},
+			{
+				MethodVarName: "DeleteThing",
+				PayloadRef:    "*toymut.DeleteThingPayload",
+				Routes:        []RouteSpec{{Verb: "DELETE", Path: "/things/{id}"}},
+			},
+		},
+	}
+
+	f := RenderServiceVCR(spec)
+	outDir := t.TempDir()
+	outPath, err := f.Render(outDir)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	src := string(data)
+
+	// Recordable GET still dials the stub-backed client.
+	assertContains(t, src, `return b.hc.GetThing(ctx, p)`)
+
+	// Non-recordable PATCH short-circuits with the runtime helper.
+	assertContains(t, src, `return zeroValue[*toymut.Settings](), vcrruntime.NoScenarioHandler(ctx, "UpdateSettings", "PATCH")`)
+	assertNotContains(t, src, `return b.hc.UpdateSettings(ctx, p)`)
+
+	// Non-recordable DELETE with no result type returns just the error.
+	assertContains(t, src, `return vcrruntime.NoScenarioHandler(ctx, "DeleteThing", "DELETE")`)
+	assertNotContains(t, src, `return b.hc.DeleteThing(ctx, p)`)
+}
+
 func assertContains(t *testing.T, haystack, needle string) {
 	t.Helper()
 	if !strings.Contains(haystack, needle) {
