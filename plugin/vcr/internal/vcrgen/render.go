@@ -15,6 +15,7 @@ func RenderServiceVCR(spec ServiceSpec) *codegen.File {
 		codegen.SimpleImport("errors"),
 		codegen.SimpleImport("fmt"),
 		codegen.SimpleImport("net/http"),
+		codegen.SimpleImport("net/url"),
 
 		codegen.NewImport("vcrruntime", "github.com/xeger/goa-vcr/runtime"),
 		codegen.NewImport("goahttp", "goa.design/goa/v3/http"),
@@ -143,6 +144,20 @@ type backgroundService struct {
 	hc *{{ .ServicePkgName }}.Client
 }
 
+type recordingBaseTransport struct{}
+
+func (recordingBaseTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Method == http.MethodGet {
+		req = req.Clone(req.Context())
+		req.Header.Del("Accept-Encoding")
+	}
+	return http.DefaultTransport.RoundTrip(req)
+}
+
+type recordingBackgroundService struct {
+	hc *{{ .ServicePkgName }}.Client
+}
+
 // NewBackground returns a {{ .ServicePkgName }}.Service backed by recorded
 // stubs in store.
 func NewBackground(store *vcrruntime.VCR) {{ .ServicePkgName }}.Service {
@@ -156,6 +171,22 @@ func NewBackground(store *vcrruntime.VCR) {{ .ServicePkgName }}.Service {
 	hc := httpclient.NewClient(scheme, host, doer, goahttp.RequestEncoder, goahttp.ResponseDecoder, false)
 	{{- end }}
 	return &backgroundService{hc: &{{ .ServicePkgName }}.Client{
+		{{- range .Endpoints }}
+		{{ .MethodVarName }}Endpoint: hc.{{ .MethodVarName }}(),
+		{{- end }}
+	}}
+}
+
+// NewRecordingBackground returns a {{ .ServicePkgName }}.Service backed by the
+// configured upstream and RecordingTransport.
+func NewRecordingBackground(ctx context.Context, store *vcrruntime.VCR, upstream *url.URL) {{ .ServicePkgName }}.Service {
+	doer := &http.Client{Transport: vcrruntime.NewRecordingTransport(ctx, store, Endpoints(), recordingBaseTransport{}, 0)}
+	{{- if .HasWebSocket }}
+	hc := httpclient.NewClient(upstream.Scheme, upstream.Host, doer, goahttp.RequestEncoder, goahttp.ResponseDecoder, false, nil, nil)
+	{{- else }}
+	hc := httpclient.NewClient(upstream.Scheme, upstream.Host, doer, goahttp.RequestEncoder, goahttp.ResponseDecoder, false)
+	{{- end }}
+	return &recordingBackgroundService{hc: &{{ .ServicePkgName }}.Client{
 		{{- range .Endpoints }}
 		{{ .MethodVarName }}Endpoint: hc.{{ .MethodVarName }}(),
 		{{- end }}
@@ -235,6 +266,10 @@ func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}
 func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}, stream {{ $.ServicePkgName }}.{{ .MethodVarName }}ServerStream) error {
 	return fmt.Errorf("vcr: no scenario handler for {{ .MethodVarName }} and no recorded-stream background is available")
 }
+
+func (b *recordingBackgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}, stream {{ $.ServicePkgName }}.{{ .MethodVarName }}ServerStream) error {
+	return vcrruntime.RecordNoScenarioHandler(ctx, "{{ .MethodVarName }}", "{{ backgroundVerb . }}")
+}
 {{ else if and .HasRawResponse .ResultRef }}
 func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, io.ReadCloser, error) {
 	if h := s.queue.Next("{{ .MethodVarName }}"); h != nil {
@@ -258,6 +293,18 @@ func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .Payl
 	return res, body, nil
 	{{- end }}
 }
+
+func (b *recordingBackgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, io.ReadCloser, error) {
+	{{- if not (isRecordable .) }}
+	return zeroValue[{{ .ResultRef }}](), nil, vcrruntime.RecordNoScenarioHandler(ctx, "{{ .MethodVarName }}", "{{ backgroundVerb . }}")
+	{{- else }}
+	res, body, err := b.hc.{{ .MethodVarName }}(ctx, p)
+	if err != nil {
+		return zeroValue[{{ .ResultRef }}](), nil, err
+	}
+	return res, body, nil
+	{{- end }}
+}
 {{ else if .HasRawResponse }}
 func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) (io.ReadCloser, error) {
 	if h := s.queue.Next("{{ .MethodVarName }}"); h != nil {
@@ -273,6 +320,14 @@ func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}
 func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) (io.ReadCloser, error) {
 	{{- if not (isRecordable .) }}
 	return nil, vcrruntime.NoScenarioHandler(ctx, "{{ .MethodVarName }}", "{{ backgroundVerb . }}")
+	{{- else }}
+	return b.hc.{{ .MethodVarName }}(ctx, p)
+	{{- end }}
+}
+
+func (b *recordingBackgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) (io.ReadCloser, error) {
+	{{- if not (isRecordable .) }}
+	return nil, vcrruntime.RecordNoScenarioHandler(ctx, "{{ .MethodVarName }}", "{{ backgroundVerb . }}")
 	{{- else }}
 	return b.hc.{{ .MethodVarName }}(ctx, p)
 	{{- end }}
@@ -307,6 +362,18 @@ func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .Payl
 	return res, viewFromPayload(p), nil
 	{{- end }}
 }
+
+func (b *recordingBackgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, string, error) {
+	{{- if not (isRecordable .) }}
+	return zeroValue[{{ .ResultRef }}](), "", vcrruntime.RecordNoScenarioHandler(ctx, "{{ .MethodVarName }}", "{{ backgroundVerb . }}")
+	{{- else }}
+	res, err := b.hc.{{ .MethodVarName }}(ctx, p)
+	if err != nil {
+		return zeroValue[{{ .ResultRef }}](), "", err
+	}
+	return res, viewFromPayload(p), nil
+	{{- end }}
+}
 {{ else if .ResultRef }}
 func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, error) {
 	if h := s.queue.Next("{{ .MethodVarName }}"); h != nil {
@@ -326,6 +393,14 @@ func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .Payl
 	return b.hc.{{ .MethodVarName }}(ctx, p)
 	{{- end }}
 }
+
+func (b *recordingBackgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) ({{ .ResultRef }}, error) {
+	{{- if not (isRecordable .) }}
+	return zeroValue[{{ .ResultRef }}](), vcrruntime.RecordNoScenarioHandler(ctx, "{{ .MethodVarName }}", "{{ backgroundVerb . }}")
+	{{- else }}
+	return b.hc.{{ .MethodVarName }}(ctx, p)
+	{{- end }}
+}
 {{ else }}
 func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) error {
 	if h := s.queue.Next("{{ .MethodVarName }}"); h != nil {
@@ -341,6 +416,14 @@ func (s *Scenario) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}
 func (b *backgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) error {
 	{{- if not (isRecordable .) }}
 	return vcrruntime.NoScenarioHandler(ctx, "{{ .MethodVarName }}", "{{ backgroundVerb . }}")
+	{{- else }}
+	return b.hc.{{ .MethodVarName }}(ctx, p)
+	{{- end }}
+}
+
+func (b *recordingBackgroundService) {{ .MethodVarName }}(ctx context.Context, p {{ .PayloadRef }}) error {
+	{{- if not (isRecordable .) }}
+	return vcrruntime.RecordNoScenarioHandler(ctx, "{{ .MethodVarName }}", "{{ backgroundVerb . }}")
 	{{- else }}
 	return b.hc.{{ .MethodVarName }}(ctx, p)
 	{{- end }}

@@ -18,7 +18,6 @@ func RenderServiceVCRCLI(spec ServiceSpec) *codegen.File {
 		codegen.SimpleImport("fmt"),
 		codegen.SimpleImport("io"),
 		codegen.SimpleImport("net/http"),
-		codegen.SimpleImport("net/http/httputil"),
 		codegen.SimpleImport("net/url"),
 		codegen.SimpleImport("os"),
 		codegen.SimpleImport("os/signal"),
@@ -141,6 +140,11 @@ func normalizeCLIConfig(cfg CLIConfig) CLIConfig {
 	}
 	if cfg.ScenarioRegistry == nil {
 		cfg.ScenarioRegistry = map[string]func({{ .ServicePkgName }}.Service) {{ .ServicePkgName }}.Service{}
+	}
+	if _, ok := cfg.ScenarioRegistry["Noop"]; !ok {
+		cfg.ScenarioRegistry["Noop"] = func(next {{ .ServicePkgName }}.Service) {{ .ServicePkgName }}.Service {
+			return next
+		}
 	}
 	return cfg
 }
@@ -340,6 +344,8 @@ func cmdRecord(args []string, cfg CLIConfig) int {
 	fs := flag.NewFlagSet("record", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	portFlag := fs.Int("port", cfg.DefaultPort, "Port to listen on")
+	scenarioFlag := scenarioListFlag{}
+	fs.Var(&scenarioFlag, "scenario", "Scenario name (repeat for outer-to-inner stack)")
 	var upstreamFlag stringFlag
 	upstreamFlag.value = cfg.DefaultUpstream
 	fs.Var(&upstreamFlag, "upstream", "Upstream base URL when creating a policy")
@@ -410,22 +416,53 @@ func cmdRecord(args []string, cfg CLIConfig) int {
 		return 1
 	}
 
-	proxy := httputil.NewSingleHostReverseProxy(upstreamURL)
-	proxy.Transport = vcrruntime.NewRecordingTransport(ctx, store, endpoints, proxy.Transport, 0)
-	originalDirector := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		originalDirector(req)
-		req.Host = upstreamURL.Host
-		// Prefer uncompressed responses for stable recordings.
-		if req.Method == http.MethodGet {
-			req.Header.Del("Accept-Encoding")
-		}
+	activeNames := []string(scenarioFlag)
+	if len(activeNames) == 0 {
+		activeNames = append(activeNames, cfg.DefaultScenarios...)
 	}
+	defaultSpecs := scenarioSpecs(activeNames)
+
+	registered := make([]string, 0, len(cfg.ScenarioRegistry))
+	for name := range cfg.ScenarioRegistry {
+		registered = append(registered, name)
+	}
+	sort.Strings(registered)
+
+	buildRecord := func(specs []vcrruntime.ScenarioSpec) (http.Handler, error) {
+		bg := NewRecordingBackground(ctx, store, upstreamURL)
+		layers := make([]func({{ .ServicePkgName }}.Service) {{ .ServicePkgName }}.Service, len(specs))
+		for i := range specs {
+			layer, ok := cfg.ScenarioRegistry[specs[i].Name]
+			if !ok {
+				return nil, fmt.Errorf("unknown scenario %q", specs[i].Name)
+			}
+			layers[i] = layer
+		}
+		svc := Stack(bg, layers...)
+		h, err := NewPlaybackHandler(svc)
+		if err != nil {
+			return nil, err
+		}
+		return vcrAccessLog(store)(h), nil
+	}
+	controller, err := vcrruntime.NewActiveScenarios(registered, defaultSpecs, buildRecord)
+	if err != nil {
+		log.Errorf(ctx, err, "failed to build record handler")
+		return 1
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle("/", controller)
+	mux.HandleFunc("/__vcr__/scenarios", controller.HandleScenarios)
+	mux.HandleFunc("/__vcr__/scenarios/active", controller.HandleActiveScenarios)
+
+	// Order matters: install a clue/log logger in the request context first.
+	h := withRequestLogContext(mux)
 
 	addr := fmt.Sprintf(":%d", *portFlag)
 	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           proxy,
+		Handler:           h,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -441,7 +478,7 @@ func cmdRecord(args []string, cfg CLIConfig) int {
 		_ = httpServer.Close()
 	}()
 
-	log.Print(ctx, log.KV{K: "http-addr", V: addr}, log.KV{K: "vcr.upstream", V: store.Policy.Upstream})
+	log.Print(ctx, log.KV{K: "http-addr", V: addr}, log.KV{K: "vcr.upstream", V: store.Policy.Upstream}, log.KV{K: "vcr.scenarios", V: strings.Join(scenarioNames(defaultSpecs), ",")})
 
 	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Errorf(ctx, err, "server error")

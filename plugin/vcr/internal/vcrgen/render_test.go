@@ -62,6 +62,14 @@ func TestRenderServiceVCR_UnaryEmitsScenarioAsService(t *testing.T) {
 	assertContains(t, src, `func (b *backgroundService) GetThing(ctx context.Context, p *toy.GetThingPayload) (*toy.Thing, error)`)
 	assertContains(t, src, `return b.hc.GetThing(ctx, p)`)
 
+	// Record background is a Service implementation backed by the upstream
+	// recorder transport, so record can share scenario dispatch with playback.
+	assertContains(t, src, `type recordingBackgroundService struct {`)
+	assertContains(t, src, `func NewRecordingBackground(ctx context.Context, store *vcrruntime.VCR, upstream *url.URL) toy.Service`)
+	assertContains(t, src, `vcrruntime.NewRecordingTransport(ctx, store, Endpoints(), recordingBaseTransport{}, 0)`)
+	assertContains(t, src, `func (b *recordingBackgroundService) GetThing(ctx context.Context, p *toy.GetThingPayload) (*toy.Thing, error)`)
+	assertContains(t, src, `return b.hc.GetThing(ctx, p)`)
+
 	// Stack helper.
 	assertContains(t, src, `func Stack(bg toy.Service, layers ...func(toy.Service) toy.Service) toy.Service`)
 
@@ -345,9 +353,13 @@ func TestRenderServiceVCR_NonGetBackgroundShortCircuits(t *testing.T) {
 	// Non-recordable PATCH short-circuits with the runtime helper.
 	assertContains(t, src, `return zeroValue[*toymut.Settings](), vcrruntime.NoScenarioHandler(ctx, "UpdateSettings", "PATCH")`)
 	assertNotContains(t, src, `return b.hc.UpdateSettings(ctx, p)`)
+	assertContains(t, src, `return zeroValue[*toymut.Settings](), vcrruntime.RecordNoScenarioHandler(ctx, "UpdateSettings", "PATCH")`)
+	assertNotContains(t, src, `return b.hc.UpdateSettings(ctx, p)`)
 
 	// Non-recordable DELETE with no result type returns just the error.
 	assertContains(t, src, `return vcrruntime.NoScenarioHandler(ctx, "DeleteThing", "DELETE")`)
+	assertNotContains(t, src, `return b.hc.DeleteThing(ctx, p)`)
+	assertContains(t, src, `return vcrruntime.RecordNoScenarioHandler(ctx, "DeleteThing", "DELETE")`)
 	assertNotContains(t, src, `return b.hc.DeleteThing(ctx, p)`)
 }
 

@@ -168,6 +168,76 @@ func TestPlayback_ScenarioOverridesUnary(t *testing.T) {
 	}
 }
 
+func TestRecord_ScenarioOverridesUnaryAndBackgroundRecordsGET(t *testing.T) {
+	var upstreamHits int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHits++
+		if r.Method != http.MethodGet || r.URL.Path != "/things/123" {
+			t.Fatalf("unexpected upstream request: %%s %%s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("{\"id\":\"123\"}\n"))
+	}))
+	defer upstream.Close()
+
+	stubRoot := t.TempDir()
+	policyJSON := fmt.Sprintf("{\"upstream\":%%q,\"endpoints\":{\"GetThing\":{\"variant\":{\"path\":false}}}}\n", upstream.URL)
+	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte(policyJSON), 0600); err != nil {
+		t.Fatalf("write policy: %%v", err)
+	}
+	store, err := vcrruntime.New(stubRoot)
+	if err != nil {
+		t.Fatalf("new store: %%v", err)
+	}
+	upstreamURL, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatalf("parse upstream URL: %%v", err)
+	}
+
+	bg := toyvcr.NewRecordingBackground(context.Background(), store, upstreamURL)
+	sc := toyvcr.NewScenario(bg)
+	sc.SetGetThing(func(ctx context.Context, p *toy.GetThingPayload, next toy.Service) (*toy.Thing, error) {
+		return &toy.Thing{ID: "scenario-" + p.ID}, nil
+	})
+	h, err := toyvcr.NewPlaybackHandler(sc)
+	if err != nil {
+		t.Fatalf("handler: %%v", err)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	res := mustGet(t, srv.URL+"/things/999", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected scenario status: %%d", res.StatusCode)
+	}
+	got := decodeThing(t, res.Body)
+	if got.ID != "scenario-999" {
+		t.Fatalf("unexpected scenario id: %%q", got.ID)
+	}
+	if upstreamHits != 0 {
+		t.Fatalf("scenario request should not hit upstream, got %%d hits", upstreamHits)
+	}
+
+	h, err = toyvcr.NewPlaybackHandler(bg)
+	if err != nil {
+		t.Fatalf("background handler: %%v", err)
+	}
+	bgSrv := httptest.NewServer(h)
+	defer bgSrv.Close()
+
+	bgRes := mustGet(t, bgSrv.URL+"/things/123", nil)
+	if bgRes.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected background status: %%d", bgRes.StatusCode)
+	}
+	_ = decodeThing(t, bgRes.Body)
+	if upstreamHits != 1 {
+		t.Fatalf("background request should hit upstream once, got %%d hits", upstreamHits)
+	}
+	if ok, err := store.HasStub("GetThing", ""); err != nil || !ok {
+		t.Fatalf("expected GetThing stub, ok=%%v err=%%v", ok, err)
+	}
+}
+
 func TestPlayback_ScenarioOverridesRawResponseBody(t *testing.T) {
 	stubRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(stubRoot, vcrruntime.PolicyFileName), []byte("{\"upstream\":\"https://example.com\"}\n"), 0600); err != nil {

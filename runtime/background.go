@@ -28,3 +28,18 @@ func NoScenarioHandler(ctx context.Context, method, verb string) error {
 	)
 	return err
 }
+
+// RecordNoScenarioHandler logs and returns an error when record mode reaches a
+// request that cannot be recorded and was not handled by a scenario layer.
+func RecordNoScenarioHandler(ctx context.Context, method, verb string) error {
+	err := fmt.Errorf(
+		"vcr: no scenario handler for %s (%s is not recorded; register a handler via Scenario.Set%s or Scenario.Add%s)",
+		method, verb, method, method,
+	)
+	log.Error(ctx, err,
+		log.KV{K: "vcr.action", V: "record_no_scenario_handler"},
+		log.KV{K: "vcr.endpoint.name", V: method},
+		log.KV{K: "http.method", V: verb},
+	)
+	return err
+}
