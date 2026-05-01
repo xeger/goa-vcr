@@ -48,6 +48,18 @@ func (t *RecordingTransport) RoundTrip(req *http.Request) (*http.Response, error
 	if ok {
 		div = RequestDiversifier(t.store.Policy, endpointName, req.URL.Query(), vars)
 	}
+	if req.Method != http.MethodGet {
+		kvs := []log.Fielder{
+			log.KV{K: "vcr.action", V: "record_method_not_allowed"},
+			log.KV{K: "http.method", V: req.Method},
+			log.KV{K: "http.url", V: req.URL.String()},
+		}
+		if ok {
+			kvs = append(kvs, log.KV{K: "vcr.endpoint.name", V: endpointName})
+		}
+		log.Error(log.With(t.ctx, kvs...), nil)
+		return vcrErrorResponse(req, http.StatusNotImplemented, "vcr: record mode only forwards GET; non-GET requests require a scenario handler"), nil
+	}
 
 	resp, err := t.base.RoundTrip(req)
 	if err != nil || resp == nil {

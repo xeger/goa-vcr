@@ -38,6 +38,48 @@ type ioNopCloser struct{ r *bytes.Reader }
 func (c ioNopCloser) Read(p []byte) (int, error) { return c.r.Read(p) }
 func (c ioNopCloser) Close() error               { return nil }
 
+type countingRoundTripper struct {
+	calls int
+}
+
+func (rt *countingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	rt.calls++
+	return &http.Response{
+		StatusCode:    http.StatusOK,
+		Header:        http.Header{"Content-Type": []string{"application/json"}},
+		Body:          ioNopCloser{r: bytes.NewReader([]byte(`{"mutated":true}`))},
+		ContentLength: int64(len(`{"mutated":true}`)),
+		Request:       req,
+	}, nil
+}
+
+func TestRecordingTransportBlocksNonGetBeforeUpstream(t *testing.T) {
+	tmp := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmp, PolicyFileName), []byte("{\"upstream\":\"https://example.com\"}\n"), 0600); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+	store, err := New(tmp)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	base := &countingRoundTripper{}
+	tr := NewRecordingTransport(context.Background(), store, []Endpoint{
+		{Name: "UpdateSettings", Method: http.MethodPatch, Pattern: "/settings"},
+	}, base, 0)
+
+	resp, err := tr.RoundTrip(mustRequest(t, http.MethodPatch, "http://example.com/settings"))
+	if err != nil {
+		t.Fatalf("round trip: %v", err)
+	}
+	if base.calls != 0 {
+		t.Fatalf("non-GET should not reach upstream, got %d calls", base.calls)
+	}
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("unexpected status: %d", resp.StatusCode)
+	}
+}
+
 func TestRecordingTransportDoesNotAutoDisableQueryVariants(t *testing.T) {
 	tmp := t.TempDir()
 	// Path variant off so this test only exercises query diversifiers.
